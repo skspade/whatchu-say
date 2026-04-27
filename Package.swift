@@ -126,6 +126,11 @@ let package = Package(
             dependencies: ["Usage"],
             path: "Tests/UsageTests"
         ),
+        .testTarget(
+            name: "PlatformAppleTests",
+            dependencies: ["PlatformApple", "Hotkey"],
+            path: "Tests/PlatformAppleTests"
+        ),
     ],
     swiftLanguageModes: [.v6]
 )
