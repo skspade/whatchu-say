@@ -1,0 +1,35 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Xcode
+DerivedData/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+xcuserdata/
+
+# Build artifacts
+*.dylib
+*.so
+*.o
+
+# IDE
+.vscode/
+.idea/
+
+# Editor
+*.swp
+*.swo
+*~
+
+# Local config
+.env
+.env.local
+secrets/
+
+# Logs
+*.log
