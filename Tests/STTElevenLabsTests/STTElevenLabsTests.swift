@@ -24,7 +24,7 @@ struct ElevenLabsEndpointsTests {
         #expect(components.host == "api.elevenlabs.io")
         #expect(components.path == "/v1/speech-to-text/realtime")
         let items = items(components)
-        #expect(items["model_id"] == "scribe_v1")
+        #expect(items["model_id"] == "scribe_v2_realtime")
         #expect(items["audio_format"] == "pcm_16000")
         #expect(items["commit_strategy"] == "manual")
         #expect(items["language_code"] == nil)
@@ -128,12 +128,12 @@ struct InputAudioChunkEncodingTests {
         return e
     }()
 
-    @Test("regular chunk omits commit and previous_text")
-    func regularChunk() throws {
+    @Test("streaming chunk always emits commit:false and omits previous_text")
+    func streamingChunk() throws {
         let chunk = InputAudioChunk(
             audioBase64: "AAEC",
             sampleRate: 16_000,
-            commit: nil,
+            commit: false,
             previousText: nil
         )
         let data = try encoder.encode(chunk)
@@ -141,11 +141,11 @@ struct InputAudioChunkEncodingTests {
         #expect(object["message_type"] as? String == "input_audio_chunk")
         #expect(object["audio_base_64"] as? String == "AAEC")
         #expect(object["sample_rate"] as? Int == 16_000)
-        #expect(object["commit"] == nil)
+        #expect(object["commit"] as? Bool == false)
         #expect(object["previous_text"] == nil)
     }
 
-    @Test("commit chunk sets commit to true")
+    @Test("commit chunk sets commit:true with empty audio")
     func commitChunk() throws {
         let chunk = InputAudioChunk(
             audioBase64: "",

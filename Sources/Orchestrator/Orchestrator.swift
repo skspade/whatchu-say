@@ -109,8 +109,9 @@ public actor Orchestrator {
             currentSession = session
             currentMode = mode
         } catch {
-            // Skeleton: silently fail. Real impl in 1.4 surfaces a toast and
-            // resets the FSM.
+            // TODO(1.4): surface as a toast and reset the FSM. Logging until
+            // we have UI to display this.
+            print("[Orchestrator] provider.open failed: \(error)")
         }
     }
 
@@ -173,9 +174,20 @@ public actor Orchestrator {
         }
     }
 
+    private var forwardedFrames: Int = 0
+
     private func forwardFrameIfActive(_ frame: AudioFrame) async {
         guard let session = currentSession else { return }
-        try? await session.pushAudio(frame.samples)
+        do {
+            try await session.pushAudio(frame.samples)
+            forwardedFrames += 1
+            // Log every ~1 s of audio (50 frames @ 20 ms each).
+            if forwardedFrames % 50 == 0 {
+                print("[Orchestrator] forwarded \(forwardedFrames) audio frames so far")
+            }
+        } catch {
+            print("[Orchestrator] pushAudio failed: \(error)")
+        }
     }
 
     // MARK: - Timer

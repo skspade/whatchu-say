@@ -56,12 +56,15 @@ public actor AVAudioCapture: AudioCapturing {
     public func start() async throws {
         guard engine == nil else { return }
 
+        print("[AVAudioCapture] requesting mic permission")
         let granted = await AVCaptureDevice.requestAccess(for: .audio)
+        print("[AVAudioCapture] mic permission granted=\(granted)")
         guard granted else { throw AudioCaptureError.permissionDenied }
 
         let engine = AVAudioEngine()
         let input = engine.inputNode
         let inputFormat = input.inputFormat(forBus: 0)
+        print("[AVAudioCapture] input format: \(inputFormat)")
 
         guard let outputFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
@@ -102,9 +105,11 @@ public actor AVAudioCapture: AudioCapturing {
         } catch {
             input.removeTap(onBus: 0)
             startedAt = nil
+            print("[AVAudioCapture] engine.start FAILED: \(error)")
             throw AudioCaptureError.engineStartFailed(String(describing: error))
         }
 
+        print("[AVAudioCapture] engine started")
         self.engine = engine
     }
 

@@ -49,26 +49,33 @@ public actor ElevenLabsSession: SttSession {
     /// Resume the WebSocket and wait for the server's `session_started`
     /// handshake before returning. Any failure here aborts session creation.
     func start() async throws {
+        print("[ElevenLabs] connecting to \(task.originalRequest?.url?.absoluteString ?? "<no url>")")
         task.resume()
 
         let first: ServerMessage
         do {
             first = try await receiveOne()
         } catch let error as SttError {
+            print("[ElevenLabs] handshake failed (SttError): \(error)")
             await tearDown()
             throw error
         } catch {
+            let ns = error as NSError
+            print("[ElevenLabs] handshake failed: domain=\(ns.domain) code=\(ns.code) desc=\(ns.localizedDescription)")
             await tearDown()
             throw Self.mapNetworkError(error)
         }
 
         switch first {
         case .sessionStarted:
+            print("[ElevenLabs] session_started received")
             startReceiveLoop()
         case .error(let kind, let message):
+            print("[ElevenLabs] server error on connect: \(kind): \(message)")
             await tearDown()
             throw kind == "auth_error" ? SttError.authentication : SttError.fatal("\(kind): \(message)")
         case .partialTranscript, .committedTranscript, .unknown:
+            print("[ElevenLabs] unexpected first message: \(first)")
             await tearDown()
             throw SttError.fatal("unexpected first message from server")
         }
@@ -79,7 +86,7 @@ public actor ElevenLabsSession: SttSession {
         let chunk = InputAudioChunk(
             audioBase64: Self.base64(samples: samples),
             sampleRate: sampleRate,
-            commit: nil,
+            commit: false,
             previousText: nil
         )
         try await send(chunk)
@@ -87,6 +94,9 @@ public actor ElevenLabsSession: SttSession {
 
     public func endOfStream() async throws {
         guard !closed else { return }
+        // Server rejects a standalone {"message_type":"commit"} envelope and
+        // requires `commit:true` ride along on an input_audio_chunk. Empty
+        // audio is accepted as the carrier.
         let chunk = InputAudioChunk(
             audioBase64: "",
             sampleRate: sampleRate,
@@ -102,10 +112,10 @@ public actor ElevenLabsSession: SttSession {
 
     // MARK: - Send / receive plumbing
 
-    private func send(_ chunk: InputAudioChunk) async throws {
-        let data = try Self.encoder.encode(chunk)
+    private func send<Message: Encodable>(_ message: Message) async throws {
+        let data = try Self.encoder.encode(message)
         guard let text = String(data: data, encoding: .utf8) else {
-            throw SttError.fatal("failed to serialize audio chunk")
+            throw SttError.fatal("failed to serialize message")
         }
         do {
             try await task.send(.string(text))
@@ -148,25 +158,29 @@ public actor ElevenLabsSession: SttSession {
         do {
             message = try await receiveOne()
         } catch {
+            print("[ElevenLabs] websocket recv error: \(error.localizedDescription)")
             eventsContinuation.yield(.warning("websocket error: \(error.localizedDescription)"))
             await tearDown()
             return false
         }
         switch message {
         case .sessionStarted:
-            // Re-handshake mid-stream is unexpected but harmless; ignore.
             return true
         case .partialTranscript(let text):
+            print("[ElevenLabs] partial: \(text)")
             eventsContinuation.yield(.partial(text: text, stability: 0.8))
             return true
         case .committedTranscript(let text):
+            print("[ElevenLabs] committed: \(text)")
             eventsContinuation.yield(.final(text: text, alternatives: []))
             return true
         case .error(let kind, let message):
+            print("[ElevenLabs] server error: \(kind): \(message)")
             eventsContinuation.yield(.warning("\(kind): \(message)"))
             await tearDown()
             return false
         case .unknown(let messageType):
+            print("[ElevenLabs] unknown message_type: \(messageType)")
             eventsContinuation.yield(.warning("unknown message_type: \(messageType)"))
             return true
         }
