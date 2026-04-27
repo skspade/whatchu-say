@@ -27,15 +27,17 @@ final class AppState {
 ///
 /// Lifecycle:
 /// - `init` builds the components but does no I/O.
-/// - `start()` spins up the hotkey tap and a status-poll task. Re-entrant
-///   calls are no-ops.
-/// - `shutdown()` tears down the hotkey tap. Audio + sessions are owned by
-///   the orchestrator and stop on their own when `cancelDictation` runs.
-actor AppCoordinator {
+/// - `start()` spins up the hotkey tap and the orchestrator-event consumer.
+///   Re-entrant calls are no-ops.
+/// - `shutdown()` tears down the hotkey tap and HUD subscriptions.
+@MainActor
+final class AppCoordinator {
     let state: AppState
     private let orchestrator: Orchestrator
     private let hotkeySource: HotkeySourceMac
-    private var statusPollTask: Task<Void, Never>?
+    private let audio: AVAudioCapture
+    private let hud: HUDController
+    private var eventTask: Task<Void, Never>?
     private var started = false
 
     init(apiKey: String, state: AppState) {
@@ -45,6 +47,7 @@ actor AppCoordinator {
         let stateMachine = ActivationStateMachine()
         let usage = UsageTracker()
         let audio = AVAudioCapture()
+        self.audio = audio
         self.orchestrator = Orchestrator(
             provider: provider,
             injector: injector,
@@ -53,6 +56,7 @@ actor AppCoordinator {
             audioCapture: audio
         )
         self.hotkeySource = HotkeySourceMac()
+        self.hud = HUDController()
     }
 
     func start() async {
@@ -64,36 +68,45 @@ actor AppCoordinator {
                 await orchestrator.handle(hotkeyEvent: event)
             }
         } catch {
-            await setStartupFailure(error.localizedDescription)
+            state.status = .startupFailed(error.localizedDescription)
+            state.lastError = error.localizedDescription
             return
         }
 
-        // Poll the orchestrator so the menu-bar icon reflects timer-driven
-        // transitions (short-press finalize, hands-free promote) without a
-        // dedicated event stream from the orchestrator. 200 ms is well below
-        // human notice and trivially cheap.
-        statusPollTask = Task { [orchestrator, state] in
-            while !Task.isCancelled {
-                let capturing = await orchestrator.isCapturing()
-                await MainActor.run {
-                    if case .startupFailed = state.status { return }
-                    state.status = capturing ? .listening : .idle
-                }
-                try? await Task.sleep(for: .milliseconds(200))
+        hud.attachAudio(rms: audio.rmsLevels)
+
+        eventTask = Task { [orchestrator, state, hud] in
+            for await event in orchestrator.events {
+                hud.handle(event: event)
+                Self.applyToAppState(event, state: state)
             }
         }
     }
 
     func shutdown() async {
-        statusPollTask?.cancel()
-        statusPollTask = nil
+        eventTask?.cancel()
+        eventTask = nil
+        hud.detach()
         await hotkeySource.stop()
         started = false
     }
 
-    @MainActor
-    private func setStartupFailure(_ message: String) {
-        state.status = .startupFailed(message)
-        state.lastError = message
+    /// Drive `AppState` from orchestrator lifecycle events instead of polling.
+    /// Static so the consumer Task doesn't need to capture self.
+    private static func applyToAppState(_ event: OrchestratorEvent, state: AppState) {
+        if case .startupFailed = state.status { return }
+        switch event {
+        case .sessionStarted:
+            state.status = .listening
+        case .sessionEnded(let injectedText):
+            state.status = .idle
+            if let text = injectedText, !text.isEmpty {
+                state.lastTranscript = text
+            }
+        case .error(let text):
+            state.lastError = text
+        case .partial, .finalizing:
+            break
+        }
     }
 }

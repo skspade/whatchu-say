@@ -23,6 +23,11 @@ import Usage
 /// in a background Task and re-enters the actor for every frame to forward.
 /// Timer expirations also re-enter via `handle(hotkeyEvent: .timerExpired)`.
 public actor Orchestrator {
+    /// Lifecycle event stream consumed by UI (HUD, menu bar). See
+    /// `OrchestratorEvent` for what's emitted and when.
+    public nonisolated let events: AsyncStream<OrchestratorEvent>
+    private nonisolated let eventsContinuation: AsyncStream<OrchestratorEvent>.Continuation
+
     private let provider: any SttProvider
     private let injector: any Injector
     private let stateMachine: ActivationStateMachine
@@ -34,7 +39,13 @@ public actor Orchestrator {
     private var currentMode: ActivationMode = .pressHold
     private var sessionStartedAt: Date?
     private var audioForwarderTask: Task<Void, Never>?
+    private var sessionEventTask: Task<Void, Never>?
     private var timerToken: TimerToken?
+
+    /// Captured final transcript text when it arrives ahead of the
+    /// `awaitFinal()` caller. Cleared on consumption or session swap.
+    private var pendingFinal: String?
+    private var finalWaiters: [CheckedContinuation<String?, Never>] = []
 
     public init(
         provider: any SttProvider,
@@ -50,6 +61,9 @@ public actor Orchestrator {
         self.usage = usage
         self.audioCapture = audioCapture
         self.timerScheduler = timerScheduler
+        let (stream, continuation) = AsyncStream<OrchestratorEvent>.makeStream()
+        self.events = stream
+        self.eventsContinuation = continuation
     }
 
     /// Process a hotkey event end-to-end: feed the FSM, apply every resulting
@@ -108,10 +122,13 @@ public actor Orchestrator {
             let session = try await provider.open(config: SessionConfig())
             currentSession = session
             currentMode = mode
+            startSessionEventConsumer(session)
+            eventsContinuation.yield(.sessionStarted(mode: mode))
         } catch {
             // TODO(1.4): surface as a toast and reset the FSM. Logging until
             // we have UI to display this.
             print("[Orchestrator] provider.open failed: \(error)")
+            eventsContinuation.yield(.error(text: "Failed to open session: \(error.localizedDescription)"))
         }
     }
 
@@ -119,48 +136,103 @@ public actor Orchestrator {
         guard let session = currentSession else { return }
 
         try? await session.endOfStream()
+        eventsContinuation.yield(.finalizing)
 
-        var injectedText: String?
-        for await event in session.events {
-            if case .final(let text, _) = event {
-                injectedText = text
-                break
-            }
-        }
+        let finalText = await awaitFinal()
 
-        await session.close()
-        currentSession = nil
+        await closeCurrentSession()
 
-        if let text = injectedText, !text.isEmpty {
+        let injected: String?
+        if let text = finalText, !text.isEmpty {
             try? await injector.inject(text: text, hint: .auto)
+            injected = text
+        } else {
+            injected = nil
         }
 
         await audioCapture.stop()
-
         if let started = sessionStartedAt {
             let durationMs = UInt64(max(0, Date().timeIntervalSince(started)) * 1000)
             await usage.recordSession(durationMs: durationMs, provider: provider.name)
         }
         sessionStartedAt = nil
+        eventsContinuation.yield(.sessionEnded(injectedText: injected))
     }
 
     private func cancelDictation() async {
-        if let session = currentSession {
-            await session.close()
-        }
-        currentSession = nil
+        let hadSession = currentSession != nil
+        await closeCurrentSession()
         await audioCapture.stop()
         sessionStartedAt = nil
+        if hadSession {
+            eventsContinuation.yield(.sessionEnded(injectedText: nil))
+        }
     }
 
     private func promoteToHandsFree() async {
         // Discard the speculative session: close without EOS, no inject.
         // Audio capture continues; we open a fresh hands-free session.
+        await closeCurrentSession()
+        await openSession(mode: .handsFree)
+    }
+
+    /// Tear down the current session: cancel its event consumer, close the
+    /// session, drop captured-final state, and resume any waiters with `nil`
+    /// so they don't dangle.
+    private func closeCurrentSession() async {
+        sessionEventTask?.cancel()
+        sessionEventTask = nil
         if let session = currentSession {
             await session.close()
         }
         currentSession = nil
-        await openSession(mode: .handsFree)
+        pendingFinal = nil
+        let waiters = finalWaiters
+        finalWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume(returning: nil)
+        }
+    }
+
+    // MARK: - Session event consumer
+
+    private func startSessionEventConsumer(_ session: any SttSession) {
+        sessionEventTask = Task { [weak self] in
+            for await event in session.events {
+                if Task.isCancelled { return }
+                await self?.handleSessionEvent(event)
+            }
+        }
+    }
+
+    private func handleSessionEvent(_ event: SttEvent) {
+        switch event {
+        case .partial(let text, _):
+            eventsContinuation.yield(.partial(text: text))
+        case .final(let text, _):
+            if let waiter = finalWaiters.first {
+                finalWaiters.removeFirst()
+                waiter.resume(returning: text)
+            } else {
+                pendingFinal = text
+            }
+        case .warning(let message):
+            eventsContinuation.yield(.error(text: message))
+        case .providerInfo:
+            break
+        }
+    }
+
+    /// Suspend until the current session's `.final` arrives. Resumes with
+    /// `nil` if the session is torn down before a final lands.
+    private func awaitFinal() async -> String? {
+        if let text = pendingFinal {
+            pendingFinal = nil
+            return text
+        }
+        return await withCheckedContinuation { continuation in
+            finalWaiters.append(continuation)
+        }
     }
 
     // MARK: - Audio forwarding
