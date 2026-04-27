@@ -16,3 +16,15 @@ public struct AudioFrame: Sendable {
         self.timestamp = timestamp
     }
 }
+
+public enum AudioCaptureError: Error, Sendable, Equatable {
+    /// User declined the microphone permission prompt (or the host app lacks
+    /// the required entitlement / Info.plist usage description).
+    case permissionDenied
+    /// Target output format (16 kHz mono Int16) could not be constructed.
+    case formatUnsupported
+    /// AVAudioConverter could not bridge the device-native format to ours.
+    case converterUnavailable
+    /// AVAudioEngine.start() threw — message preserved for diagnostics.
+    case engineStartFailed(String)
+}
