@@ -128,7 +128,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PlatformAppleTests",
-            dependencies: ["PlatformApple", "Hotkey"],
+            dependencies: ["PlatformApple", "Hotkey", "Injector"],
             path: "Tests/PlatformAppleTests"
         ),
     ],
