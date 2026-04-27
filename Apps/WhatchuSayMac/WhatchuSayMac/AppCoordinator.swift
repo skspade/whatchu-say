@@ -15,6 +15,7 @@ final class AppState {
     enum Status: Equatable {
         case idle
         case listening
+        case needsSetup
         case startupFailed(String)
     }
     var status: Status = .idle
@@ -94,7 +95,10 @@ final class AppCoordinator {
     /// Drive `AppState` from orchestrator lifecycle events instead of polling.
     /// Static so the consumer Task doesn't need to capture self.
     private static func applyToAppState(_ event: OrchestratorEvent, state: AppState) {
-        if case .startupFailed = state.status { return }
+        switch state.status {
+        case .startupFailed, .needsSetup: return
+        default: break
+        }
         switch event {
         case .sessionStarted:
             state.status = .listening
