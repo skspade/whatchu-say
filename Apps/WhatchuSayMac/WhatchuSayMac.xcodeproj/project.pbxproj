@@ -7,15 +7,32 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		371B0EB72FA1036B00338E4A /* WhatchuSayKit in Frameworks */ = {isa = PBXBuildFile; productRef = 371B0EB62FA1036B00338E4A /* WhatchuSayKit */; };
 		37E651472F9FCCB800B6A81C /* WhatchuSayKit in Frameworks */ = {isa = PBXBuildFile; productRef = 37E651462F9FCCB800B6A81C /* WhatchuSayKit */; };
 		37E651492F9FCCB800B6A81C /* WhatchuSayPlatformApple in Frameworks */ = {isa = PBXBuildFile; productRef = 37E651482F9FCCB800B6A81C /* WhatchuSayPlatformApple */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		371B0EAE2FA0296E00338E4A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 37E6512F2F9FCC7200B6A81C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 37E651362F9FCC7200B6A81C;
+			remoteInfo = WhatchuSayMac;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		371B0EAA2FA0296E00338E4A /* WhatchuSayMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WhatchuSayMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		37E651372F9FCC7200B6A81C /* WhatchuSayMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhatchuSayMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		371B0EAB2FA0296E00338E4A /* WhatchuSayMacTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = WhatchuSayMacTests;
+			sourceTree = "<group>";
+		};
 		37E651392F9FCC7200B6A81C /* WhatchuSayMac */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = WhatchuSayMac;
@@ -24,6 +41,14 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		371B0EA72FA0296E00338E4A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				371B0EB72FA1036B00338E4A /* WhatchuSayKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		37E651342F9FCC7200B6A81C /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -36,10 +61,19 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		371B0EB52FA1036B00338E4A /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		37E6512E2F9FCC7200B6A81C = {
 			isa = PBXGroup;
 			children = (
 				37E651392F9FCC7200B6A81C /* WhatchuSayMac */,
+				371B0EAB2FA0296E00338E4A /* WhatchuSayMacTests */,
+				371B0EB52FA1036B00338E4A /* Frameworks */,
 				37E651382F9FCC7200B6A81C /* Products */,
 			);
 			sourceTree = "<group>";
@@ -48,6 +82,7 @@
 			isa = PBXGroup;
 			children = (
 				37E651372F9FCC7200B6A81C /* WhatchuSayMac.app */,
+				371B0EAA2FA0296E00338E4A /* WhatchuSayMacTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -55,6 +90,30 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		371B0EA92FA0296E00338E4A /* WhatchuSayMacTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 371B0EB02FA0296E00338E4A /* Build configuration list for PBXNativeTarget "WhatchuSayMacTests" */;
+			buildPhases = (
+				371B0EA62FA0296E00338E4A /* Sources */,
+				371B0EA72FA0296E00338E4A /* Frameworks */,
+				371B0EA82FA0296E00338E4A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				371B0EAF2FA0296E00338E4A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				371B0EAB2FA0296E00338E4A /* WhatchuSayMacTests */,
+			);
+			name = WhatchuSayMacTests;
+			packageProductDependencies = (
+				371B0EB62FA1036B00338E4A /* WhatchuSayKit */,
+			);
+			productName = WhatchuSayMacTests;
+			productReference = 371B0EAA2FA0296E00338E4A /* WhatchuSayMacTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		37E651362F9FCC7200B6A81C /* WhatchuSayMac */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 37E651422F9FCC7400B6A81C /* Build configuration list for PBXNativeTarget "WhatchuSayMac" */;
@@ -89,6 +148,10 @@
 				LastSwiftUpdateCheck = 2640;
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
+					371B0EA92FA0296E00338E4A = {
+						CreatedOnToolsVersion = 26.4.1;
+						TestTargetID = 37E651362F9FCC7200B6A81C;
+					};
 					37E651362F9FCC7200B6A81C = {
 						CreatedOnToolsVersion = 26.4.1;
 					};
@@ -112,11 +175,19 @@
 			projectRoot = "";
 			targets = (
 				37E651362F9FCC7200B6A81C /* WhatchuSayMac */,
+				371B0EA92FA0296E00338E4A /* WhatchuSayMacTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		371B0EA82FA0296E00338E4A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		37E651352F9FCC7200B6A81C /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -127,6 +198,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		371B0EA62FA0296E00338E4A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		37E651332F9FCC7200B6A81C /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -136,7 +214,55 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		371B0EAF2FA0296E00338E4A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 37E651362F9FCC7200B6A81C /* WhatchuSayMac */;
+			targetProxy = 371B0EAE2FA0296E00338E4A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		371B0EB12FA0296E00338E4A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4S4YH4HD6L;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = s900mhz.WhatchuSayMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WhatchuSayMac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/WhatchuSayMac";
+			};
+			name = Debug;
+		};
+		371B0EB22FA0296E00338E4A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4S4YH4HD6L;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = s900mhz.WhatchuSayMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WhatchuSayMac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/WhatchuSayMac";
+			};
+			name = Release;
+		};
 		37E651402F9FCC7400B6A81C /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -263,6 +389,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = WhatchuSayMac/WhatchuSayMac.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -298,6 +425,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = WhatchuSayMac/WhatchuSayMac.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -330,6 +458,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		371B0EB02FA0296E00338E4A /* Build configuration list for PBXNativeTarget "WhatchuSayMacTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				371B0EB12FA0296E00338E4A /* Debug */,
+				371B0EB22FA0296E00338E4A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		37E651322F9FCC7200B6A81C /* Build configuration list for PBXProject "WhatchuSayMac" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -358,6 +495,11 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		371B0EB62FA1036B00338E4A /* WhatchuSayKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 37E651452F9FCCB800B6A81C /* XCLocalSwiftPackageReference "../../../whatchu-say" */;
+			productName = WhatchuSayKit;
+		};
 		37E651462F9FCCB800B6A81C /* WhatchuSayKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = WhatchuSayKit;

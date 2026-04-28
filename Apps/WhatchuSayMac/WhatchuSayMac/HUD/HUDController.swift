@@ -15,7 +15,7 @@ final class HUDController {
     private var dismissTask: Task<Void, Never>?
 
     private static let panelWidth: CGFloat = 440
-    private static let panelHeight: CGFloat = 56
+    private static let panelHeight: CGFloat = 100
     private static let bottomMargin: CGFloat = 80
     private static let sessionEndedDismissDelay: Duration = .milliseconds(150)
     private static let errorDismissDelay: Duration = .seconds(2)

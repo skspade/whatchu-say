@@ -7,20 +7,22 @@ struct HUDView: View {
     let state: HUDState
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             indicator
+                .padding(.top, 4)
             Text(primaryText)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(textColor)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                .lineLimit(3)
+                .truncationMode(.head)
                 .frame(maxWidth: .infinity, alignment: .leading)
             levelMeter
+                .padding(.top, 2)
                 .opacity(showsLevelMeter ? 1 : 0)
                 .animation(.easeInOut(duration: 0.2), value: showsLevelMeter)
         }
         .padding(.horizontal, 14)
-        .frame(height: 40)
+        .padding(.vertical, 10)
         .background(
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
