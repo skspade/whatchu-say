@@ -46,6 +46,11 @@ public actor Orchestrator {
     /// `awaitFinal()` caller. Cleared on consumption or session swap.
     private var pendingFinal: String?
     private var finalWaiters: [CheckedContinuation<String?, Never>] = []
+    /// Resumed by the audio forwarder when it consumes the end-of-session
+    /// sentinel frame yielded by `audioCapture.stop()`. Used by
+    /// `stopAndDrainAudio` to know all captured frames have been forwarded
+    /// to the session before we send `endOfStream`.
+    private var audioDrainWaiter: CheckedContinuation<Void, Never>?
 
     public init(
         provider: any SttProvider,
@@ -135,6 +140,12 @@ public actor Orchestrator {
     private func finalizeAndInject() async {
         guard let session = currentSession else { return }
 
+        // Stop audio capture and wait for the forwarder to drain every
+        // captured frame into the session BEFORE committing. Without this,
+        // the tail of long transcripts arrives at the server after the
+        // commit signal and is excluded from the committed transcript.
+        await stopAndDrainAudio()
+
         try? await session.endOfStream()
         eventsContinuation.yield(.finalizing)
 
@@ -150,13 +161,23 @@ public actor Orchestrator {
             injected = nil
         }
 
-        await audioCapture.stop()
         if let started = sessionStartedAt {
             let durationMs = UInt64(max(0, Date().timeIntervalSince(started)) * 1000)
             await usage.recordSession(durationMs: durationMs, provider: provider.name)
         }
         sessionStartedAt = nil
         eventsContinuation.yield(.sessionEnded(injectedText: injected))
+    }
+
+    /// Stop audio capture and suspend until the forwarder has consumed every
+    /// frame yielded for this session, including the end-of-session sentinel.
+    /// Safe to call when no frames are buffered — the sentinel still flows
+    /// through and resumes us immediately.
+    private func stopAndDrainAudio() async {
+        await audioCapture.stop()
+        await withCheckedContinuation { cont in
+            audioDrainWaiter = cont
+        }
     }
 
     private func cancelDictation() async {
@@ -249,6 +270,16 @@ public actor Orchestrator {
     private var forwardedFrames: Int = 0
 
     private func forwardFrameIfActive(_ frame: AudioFrame) async {
+        // End-of-session sentinel from `audioCapture.stop()`: all captured
+        // frames for the session have been yielded by the time we see this.
+        // Resume any drain waiter; do NOT push to the session.
+        if frame.samples.isEmpty {
+            if let cont = audioDrainWaiter {
+                audioDrainWaiter = nil
+                cont.resume()
+            }
+            return
+        }
         guard let session = currentSession else { return }
         do {
             try await session.pushAudio(frame.samples)

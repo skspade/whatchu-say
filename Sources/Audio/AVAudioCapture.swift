@@ -32,9 +32,11 @@ public actor AVAudioCapture: AudioCapturing {
     private nonisolated let rmsContinuation: AsyncStream<Float>.Continuation
 
     private let rmsAnalyzer = RMSAnalyzer()
+    private nonisolated let inFlightIngest = InFlightCounter()
     private var engine: AVAudioEngine?
     private var chunker = Chunker()
     private var startedAt: ContinuousClock.Instant?
+    private var ingestDrainWaiter: CheckedContinuation<Void, Never>?
 
     private static let targetSampleRate: Double = 16_000
     private static let tapBufferSize: AVAudioFrameCount = 1024
@@ -85,6 +87,7 @@ public actor AVAudioCapture: AudioCapturing {
         chunker.reset()
         startedAt = .now
 
+        let counter = inFlightIngest
         input.installTap(
             onBus: 0,
             bufferSize: Self.tapBufferSize,
@@ -95,6 +98,7 @@ public actor AVAudioCapture: AudioCapturing {
             }
             let samples = Self.extractInt16(from: outputBuffer)
             if samples.isEmpty { return }
+            counter.increment()
             Task {
                 await captureRef.ingest(samples: samples)
             }
@@ -119,20 +123,43 @@ public actor AVAudioCapture: AudioCapturing {
             engine.stop()
         }
         engine = nil
+        // Wait for any tap-spawned ingest Tasks to finish chunking and yielding
+        // into the frames stream BEFORE we publish the end-of-session sentinel.
+        // removeTap is synchronous, so no new ingest Tasks will be spawned past
+        // this point — the counter only goes down from here.
+        await awaitIngestDrain()
         chunker.reset()
         startedAt = nil
+        // End-of-session sentinel: empty samples mark "all captured audio for
+        // the just-ended session is now in the stream." Consumers (the
+        // orchestrator's audio forwarder) use this to know when it's safe to
+        // send `endOfStream` to the STT provider.
+        framesContinuation.yield(AudioFrame(samples: [], timestamp: .zero))
+    }
+
+    /// Suspend until every in-flight ingest Task has yielded its chunks.
+    /// Resumes immediately if the counter is already at zero.
+    private func awaitIngestDrain() async {
+        if inFlightIngest.current == 0 { return }
+        await withCheckedContinuation { cont in
+            ingestDrainWaiter = cont
+        }
     }
 
     // MARK: - Ingest (actor-isolated)
 
     private func ingest(samples: [Int16]) async {
         let chunks = chunker.ingest(samples)
-        guard !chunks.isEmpty else { return }
         let timestamp: Duration = startedAt.map { $0.duration(to: .now) } ?? .zero
         for chunk in chunks {
             framesContinuation.yield(AudioFrame(samples: chunk, timestamp: timestamp))
             let rms = await rmsAnalyzer.process(chunk)
             rmsContinuation.yield(rms)
+        }
+        let remaining = inFlightIngest.decrement()
+        if remaining == 0, let cont = ingestDrainWaiter {
+            ingestDrainWaiter = nil
+            cont.resume()
         }
     }
 
@@ -196,5 +223,29 @@ private final class ConverterBox: @unchecked Sendable {
 // converter callback mutate its flag without tripping strict-concurrency.
 private final class SupplyState: @unchecked Sendable {
     var supplied = false
+}
+
+// Lock-protected counter shared between the audio tap (CoreAudio dispatch
+// queue, sync) and the actor's `ingest` (async). The tap increments before
+// spawning the ingest Task; ingest decrements after yielding its chunks.
+final class InFlightCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    func increment() {
+        lock.lock(); defer { lock.unlock() }
+        count += 1
+    }
+
+    func decrement() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        count -= 1
+        return count
+    }
+
+    var current: Int {
+        lock.lock(); defer { lock.unlock() }
+        return count
+    }
 }
 #endif

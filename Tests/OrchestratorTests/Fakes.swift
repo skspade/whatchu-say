@@ -45,6 +45,9 @@ actor FakeAudioCapture: AudioCapturing {
 
     func stop() async {
         stopCount += 1
+        // Mirror AVAudioCapture: yield an end-of-session sentinel (empty
+        // samples) so the orchestrator's drain waiter resumes.
+        framesContinuation.yield(AudioFrame(samples: [], timestamp: .zero))
     }
 
     nonisolated func push(_ frame: AudioFrame) {
@@ -155,6 +158,79 @@ final class ScriptableSession: SttSession, @unchecked Sendable {
 
     func yieldWarning(_ message: String) {
         continuation.yield(.warning(message))
+    }
+}
+
+// MARK: - RecordingProvider / RecordingSession
+
+/// Provider whose sessions model ElevenLabs `commit_strategy=manual` semantics:
+/// every `pushAudio` is recorded; on `endOfStream`, the session snapshots how
+/// many frames have been received and yields a `.final` whose text encodes
+/// just those frames. Frames pushed AFTER `endOfStream` go into a separate
+/// bucket and are NOT in the final — mirroring how the real server commits
+/// only audio it received before the commit signal.
+actor RecordingProvider: SttProvider {
+    nonisolated let name = "recording"
+    nonisolated let capabilities = Capabilities(
+        partials: true,
+        punctuation: true,
+        languages: .auto,
+        sampleRates: [16_000],
+        maxSessionSeconds: nil,
+        supportsClientEndpointing: true
+    )
+
+    private(set) var sessions: [RecordingSession] = []
+
+    func open(config: SessionConfig) async throws -> any SttSession {
+        let session = RecordingSession()
+        sessions.append(session)
+        return session
+    }
+
+    var lastSession: RecordingSession? { sessions.last }
+}
+
+actor RecordingSession: SttSession {
+    nonisolated let events: AsyncStream<SttEvent>
+    private nonisolated let continuation: AsyncStream<SttEvent>.Continuation
+
+    private(set) var framesBeforeEOS: [[Int16]] = []
+    private(set) var framesAfterEOS: [[Int16]] = []
+    private(set) var endOfStreamSeen = false
+    private var closed = false
+
+    init() {
+        let (stream, cont) = AsyncStream<SttEvent>.makeStream()
+        self.events = stream
+        self.continuation = cont
+    }
+
+    /// Yields a few times before recording. Models WebSocket-send latency:
+    /// the bug we exercise depends on `endOfStream` being eligible to
+    /// arrive on this actor while earlier pushAudio invocations are still
+    /// mid-flight. With the fix in place the orchestrator drains first, so
+    /// the yields no longer lose frames — but they keep the test honest by
+    /// preventing a spuriously-fast pushAudio path from hiding regressions.
+    func pushAudio(_ samples: [Int16]) async throws {
+        for _ in 0..<4 { await Task.yield() }
+        if endOfStreamSeen {
+            framesAfterEOS.append(samples)
+        } else {
+            framesBeforeEOS.append(samples)
+        }
+    }
+
+    func endOfStream() async throws {
+        endOfStreamSeen = true
+        let text = framesBeforeEOS.map { String($0.first ?? 0) }.joined(separator: ",")
+        continuation.yield(.final(text: text, alternatives: []))
+    }
+
+    func close() async {
+        guard !closed else { return }
+        closed = true
+        continuation.finish()
     }
 }
 
