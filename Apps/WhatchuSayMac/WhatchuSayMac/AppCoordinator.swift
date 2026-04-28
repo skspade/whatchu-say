@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Audio
 import Hotkey
 import Injector
@@ -19,7 +20,6 @@ final class AppState {
         case startupFailed(String)
     }
     var status: Status = .idle
-    var lastTranscript: String?
     var lastError: String?
 }
 
@@ -34,6 +34,7 @@ final class AppState {
 @MainActor
 final class AppCoordinator {
     let state: AppState
+    let recentTranscripts: RecentTranscriptsStore
     private let orchestrator: Orchestrator
     private let hotkeySource: HotkeySourceMac
     private let audio: AVAudioCapture
@@ -41,8 +42,9 @@ final class AppCoordinator {
     private var eventTask: Task<Void, Never>?
     private var started = false
 
-    init(apiKey: String, state: AppState) {
+    init(apiKey: String, state: AppState, recentTranscripts: RecentTranscriptsStore) {
         self.state = state
+        self.recentTranscripts = recentTranscripts
         let provider = ElevenLabsProvider(apiKey: apiKey)
         let injector = InjectorMac()
         let stateMachine = ActivationStateMachine()
@@ -76,12 +78,23 @@ final class AppCoordinator {
 
         hud.attachAudio(rms: audio.rmsLevels)
 
-        eventTask = Task { [orchestrator, state, hud] in
+        eventTask = Task { [orchestrator, state, hud, recentTranscripts] in
             for await event in orchestrator.events {
                 hud.handle(event: event)
                 Self.applyToAppState(event, state: state)
+                Self.applyToRecentTranscripts(event, store: recentTranscripts)
             }
         }
+    }
+
+    /// Copy a transcript's text to the system clipboard so the user can
+    /// paste it manually with `Cmd+V`. Replaces clipboard contents
+    /// without restoring (the user explicitly chose to put this on the
+    /// clipboard — different intent from the live-injection paste flow).
+    func copyToPasteboard(_ entry: TranscriptEntry) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(entry.text, forType: .string)
     }
 
     func shutdown() async {
@@ -102,15 +115,26 @@ final class AppCoordinator {
         switch event {
         case .sessionStarted:
             state.status = .listening
-        case .sessionEnded(let injectedText):
+        case .sessionEnded:
             state.status = .idle
-            if let text = injectedText, !text.isEmpty {
-                state.lastTranscript = text
-            }
         case .error(let text):
             state.lastError = text
         case .partial, .finalizing:
             break
+        }
+    }
+
+    /// Record an injected transcript to the recent-transcripts store.
+    /// Internal (not private) so the store-recording contract is unit-
+    /// testable. The orchestrator already filters empty finals
+    /// (`Orchestrator.swift:135-160`), so a non-nil `injectedText` is
+    /// guaranteed non-empty.
+    static func applyToRecentTranscripts(
+        _ event: OrchestratorEvent,
+        store: RecentTranscriptsStore
+    ) {
+        if case .sessionEnded(let text?) = event {
+            store.record(text: text)
         }
     }
 }

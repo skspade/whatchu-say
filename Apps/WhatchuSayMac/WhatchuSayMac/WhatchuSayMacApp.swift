@@ -19,6 +19,7 @@ struct WhatchuSayMacApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let state = AppState()
+    let recentTranscripts = RecentTranscriptsStore()
     private let keychain = KeychainAPIKeyStore()
     private let provider = "elevenlabs"
     private var coordinator: AppCoordinator?
@@ -31,12 +32,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        recentTranscripts.flushPendingWrites()
+    }
+
     /// Resolve an API key from Keychain (preferred) or the env var
     /// (development fallback), then bring up the coordinator. If neither
     /// source has a key, land in `.needsSetup` and wait for the user to set
     /// one via the menu.
     private func bootstrap() async {
         guard coordinator == nil else { return }
+
+        await recentTranscripts.load()
 
         let stored = await readStoredKey()
         let envKey = ProcessInfo.processInfo.environment["ELEVENLABS_API_KEY"]?.nonEmpty
@@ -77,7 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             coordinator = nil
         }
         currentKey = apiKey
-        let coord = AppCoordinator(apiKey: apiKey, state: state)
+        let coord = AppCoordinator(apiKey: apiKey, state: state, recentTranscripts: recentTranscripts)
         coordinator = coord
         // Optimistically clear prior errors; AppCoordinator.start() will
         // overwrite to .startupFailed if hotkey tap install fails.
@@ -124,10 +131,6 @@ private struct MenuContentView: View {
         Text(statusLabel(for: state.status))
         Divider()
         Button(setKeyMenuTitle(for: state.status)) { onSetKey() }
-        if let last = state.lastTranscript, !last.isEmpty {
-            Divider()
-            Text("Last: \(last.prefix(60))").font(.caption)
-        }
         if let error = state.lastError {
             Divider()
             Text("Error: \(error)").font(.caption).foregroundStyle(.red)
