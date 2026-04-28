@@ -91,7 +91,10 @@ final class AppCoordinator {
     /// paste it manually with `Cmd+V`. Replaces clipboard contents
     /// without restoring (the user explicitly chose to put this on the
     /// clipboard — different intent from the live-injection paste flow).
-    func copyToPasteboard(_ entry: TranscriptEntry) {
+    /// Static because it depends on no instance state and the menu must
+    /// be able to copy regardless of coordinator state (e.g., during
+    /// `.needsSetup` when no coordinator exists).
+    static func copyToPasteboard(_ entry: TranscriptEntry) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(entry.text, forType: .string)

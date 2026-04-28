@@ -8,7 +8,13 @@ struct WhatchuSayMacApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContentView(state: appDelegate.state, onSetKey: appDelegate.runSetKeyFlow)
+            MenuContentView(
+                state: appDelegate.state,
+                recentTranscripts: appDelegate.recentTranscripts,
+                onSetKey: appDelegate.runSetKeyFlow,
+                onCopyTranscript: AppCoordinator.copyToPasteboard,
+                onClearTranscripts: appDelegate.runClearRecentTranscripts
+            )
         } label: {
             MenuBarLabelView(state: appDelegate.state)
         }
@@ -54,6 +60,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         await bringUpCoordinator(apiKey: apiKey)
+    }
+
+    /// Show a confirm alert; on accept, wipe the recent-transcripts buffer
+    /// from memory and disk. Routed from the menu item.
+    func runClearRecentTranscripts() {
+        let alert = NSAlert()
+        alert.messageText = "Clear all recent transcripts?"
+        alert.informativeText = "This deletes the local list of your recent dictation transcripts. The action can't be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Clear")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        recentTranscripts.clear()
     }
 
     /// Show the API-key prompt and, on save, write to Keychain and restart
@@ -125,12 +144,21 @@ private struct MenuBarLabelView: View {
 
 private struct MenuContentView: View {
     let state: AppState
+    let recentTranscripts: RecentTranscriptsStore
     let onSetKey: () -> Void
+    let onCopyTranscript: (TranscriptEntry) -> Void
+    let onClearTranscripts: () -> Void
 
     var body: some View {
         Text(statusLabel(for: state.status))
         Divider()
         Button(setKeyMenuTitle(for: state.status)) { onSetKey() }
+        Divider()
+        RecentTranscriptsMenu(
+            entries: recentTranscripts.entries,
+            onCopy: onCopyTranscript,
+            onClear: onClearTranscripts
+        )
         if let error = state.lastError {
             Divider()
             Text("Error: \(error)").font(.caption).foregroundStyle(.red)
