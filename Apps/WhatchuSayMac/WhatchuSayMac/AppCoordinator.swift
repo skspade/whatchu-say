@@ -135,8 +135,17 @@ final class AppCoordinator {
     }
 
     /// Drive `AppState` from orchestrator lifecycle events instead of polling.
-    /// Static so the consumer Task doesn't need to capture self.
-    private static func applyToAppState(_ event: OrchestratorEvent, state: AppState) {
+    /// Static so the consumer Task doesn't need to capture self. Internal
+    /// (not private) so tests can drive it without standing up the
+    /// orchestrator.
+    ///
+    /// `lastError` lifecycle: an `.error` event sets it; the next
+    /// `.sessionEnded` carrying injected text clears it (the user
+    /// successfully recovered). Cancellations and empty finals
+    /// (`.sessionEnded(injectedText: nil)`) do **not** clear it — those don't
+    /// prove the system is healthy. Manual dismiss is wired separately
+    /// through the menu.
+    static func applyToAppState(_ event: OrchestratorEvent, state: AppState) {
         switch state.status {
         case .startupFailed, .needsSetup: return
         default: break
@@ -144,8 +153,11 @@ final class AppCoordinator {
         switch event {
         case .sessionStarted:
             state.status = .listening
-        case .sessionEnded:
+        case .sessionEnded(let text):
             state.status = .idle
+            if text != nil {
+                state.lastError = nil
+            }
         case .error(let text):
             state.lastError = text
         case .partial, .finalizing:

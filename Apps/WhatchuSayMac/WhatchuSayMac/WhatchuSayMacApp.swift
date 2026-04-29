@@ -13,7 +13,8 @@ struct WhatchuSayMacApp: App {
                 recentTranscripts: appDelegate.recentTranscripts,
                 onSetKey: appDelegate.runSetKeyFlow,
                 onCopyTranscript: AppCoordinator.copyToPasteboard,
-                onClearTranscripts: appDelegate.runClearRecentTranscripts
+                onClearTranscripts: appDelegate.runClearRecentTranscripts,
+                onDismissError: appDelegate.dismissLastError
             )
         } label: {
             MenuBarLabelView(state: appDelegate.state)
@@ -40,6 +41,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         recentTranscripts.flushPendingWrites()
+    }
+
+    /// Manually clear the persistent error indicator (yellow menubar icon
+    /// + "Error: …" line). Routed from the menu when the user knows about
+    /// the error and wants the icon clean without proving recovery via a
+    /// successful dictation.
+    func dismissLastError() {
+        state.lastError = nil
     }
 
     /// Resolve an API key from Keychain (preferred) or the env var
@@ -137,8 +146,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 private struct MenuBarLabelView: View {
     let state: AppState
     var body: some View {
-        Image(systemName: iconName(for: state.status))
-            .foregroundStyle(iconTint(for: state.status))
+        Image(systemName: iconName(for: state))
+            .foregroundStyle(iconTint(for: state))
     }
 }
 
@@ -148,11 +157,12 @@ private struct MenuContentView: View {
     let onSetKey: () -> Void
     let onCopyTranscript: (TranscriptEntry) -> Void
     let onClearTranscripts: () -> Void
+    let onDismissError: () -> Void
 
     var body: some View {
-        Text(statusLabel(for: state.status))
+        Text(statusLabel(for: state))
         Divider()
-        Button(setKeyMenuTitle(for: state.status)) { onSetKey() }
+        Button(setKeyMenuTitle(for: state)) { onSetKey() }
         Divider()
         RecentTranscriptsMenu(
             entries: recentTranscripts.entries,
@@ -162,43 +172,10 @@ private struct MenuContentView: View {
         if let error = state.lastError {
             Divider()
             Text("Error: \(error)").font(.caption).foregroundStyle(.red)
+            Button("Dismiss Error") { onDismissError() }
         }
         Divider()
         Button("Quit") { NSApp.terminate(nil) }.keyboardShortcut("q")
-    }
-}
-
-// MARK: - Status display helpers
-
-private func iconName(for status: AppState.Status) -> String {
-    switch status {
-    case .idle:           return "mic.slash"
-    case .listening:      return "mic.fill"
-    case .needsSetup:     return "key.fill"
-    case .startupFailed:  return "exclamationmark.triangle.fill"
-    }
-}
-
-private func iconTint(for status: AppState.Status) -> Color {
-    switch status {
-    case .needsSetup, .startupFailed: return .yellow
-    default:                          return .primary
-    }
-}
-
-private func statusLabel(for status: AppState.Status) -> String {
-    switch status {
-    case .idle:                       return "Idle"
-    case .listening:                  return "Listening…"
-    case .needsSetup:                 return "Set your ElevenLabs API key to begin"
-    case .startupFailed(let message): return "Startup failed: \(message)"
-    }
-}
-
-private func setKeyMenuTitle(for status: AppState.Status) -> String {
-    switch status {
-    case .needsSetup: return "Set ElevenLabs API Key…"
-    default:          return "Update API Key…"
     }
 }
 
