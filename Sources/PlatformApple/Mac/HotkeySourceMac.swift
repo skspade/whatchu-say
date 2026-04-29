@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import os
 @preconcurrency import CoreGraphics
 import Hotkey
 
@@ -20,11 +21,13 @@ import Hotkey
 /// contention, the spec calls for a dedicated CFRunLoop thread — easy
 /// follow-up since the callback already speaks via AsyncStream.
 ///
-/// ## Cancel-key passthrough
-/// We currently always pass events through (`return event`). The spec calls
-/// for swallowing Esc while dictating; that requires the orchestrator to
-/// drive a shared "active" flag. Deferred — adds coupling we don't need
-/// until we've dogfooded.
+/// ## Cancel-key consumption
+/// The C callback consults a lock-protected `isDictating` flag on the
+/// `TapContext`. When a translated `.cancelKey` event arrives while the flag
+/// is true, the callback returns `nil` to swallow the event so it doesn't
+/// reach the focused app (Esc would otherwise close modals, exit text
+/// fields, etc.). The flag is flipped by `setDictating(_:)`, driven from
+/// the orchestrator's `.sessionStarted` / `.sessionEnded` events upstream.
 public actor HotkeySourceMac: HotkeySource {
     private let translator: HotkeyEventTranslator
     private var running: Running?
@@ -102,12 +105,34 @@ public actor HotkeySourceMac: HotkeySource {
         captured.consumerTask.cancel()
     }
 
+    /// Set whether a dictation session is currently active. While `true`,
+    /// translated `.cancelKey` events are swallowed in the C callback so the
+    /// focused app never sees the Esc keystroke. No-op when the tap isn't
+    /// running. Idempotent.
+    public func setDictating(_ active: Bool) {
+        running?.context.setDictating(active)
+    }
+
     private struct Running {
         let tap: CFMachPort
         let runLoopSource: CFRunLoopSource
         let context: TapContext
         let consumerTask: Task<Void, Never>
     }
+}
+
+// MARK: - Consumption gate
+
+/// Pure decision: should the C callback swallow this event?
+///
+/// We yield the translated event into the AsyncStream regardless (the FSM
+/// still needs to see `.cancelKey` to drive the cancel flow); we only
+/// suppress propagation to the focused app.
+@inline(__always)
+func shouldConsume(translated: HotkeyEvent?, isDictating: Bool) -> Bool {
+    guard isDictating else { return false }
+    if case .cancelKey = translated { return true }
+    return false
 }
 
 // MARK: - Tap context
@@ -119,6 +144,7 @@ public actor HotkeySourceMac: HotkeySource {
 private final class TapContext: @unchecked Sendable {
     let translator: HotkeyEventTranslator
     let continuation: AsyncStream<HotkeyEvent>.Continuation
+    private let dictating = OSAllocatedUnfairLock<Bool>(initialState: false)
 
     init(
         translator: HotkeyEventTranslator,
@@ -128,7 +154,14 @@ private final class TapContext: @unchecked Sendable {
         self.continuation = continuation
     }
 
-    func handle(type: CGEventType, event: CGEvent) {
+    func setDictating(_ active: Bool) {
+        dictating.withLock { $0 = active }
+    }
+
+    /// Translate, yield, and report whether the event should be consumed.
+    /// Returns `true` when the C callback should swallow the underlying
+    /// CGEvent.
+    func handle(type: CGEventType, event: CGEvent) -> Bool {
         let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
         let autoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
         let translated = translator.translate(
@@ -141,6 +174,8 @@ private final class TapContext: @unchecked Sendable {
         if let translated {
             continuation.yield(translated)
         }
+        let isDictating = dictating.withLock { $0 }
+        return shouldConsume(translated: translated, isDictating: isDictating)
     }
 }
 
@@ -158,7 +193,9 @@ private let hotkeyTapCallback: CGEventTapCallBack = { _, type, event, refcon in
     }
     if let refcon {
         let context = Unmanaged<TapContext>.fromOpaque(refcon).takeUnretainedValue()
-        context.handle(type: type, event: event)
+        if context.handle(type: type, event: event) {
+            return nil
+        }
     }
     return Unmanaged.passUnretained(event)
 }

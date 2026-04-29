@@ -78,12 +78,31 @@ final class AppCoordinator {
 
         hud.attachAudio(rms: audio.rmsLevels)
 
-        eventTask = Task { [orchestrator, state, hud, recentTranscripts] in
+        eventTask = Task { [orchestrator, state, hud, recentTranscripts, hotkeySource] in
             for await event in orchestrator.events {
                 hud.handle(event: event)
                 Self.applyToAppState(event, state: state)
                 Self.applyToRecentTranscripts(event, store: recentTranscripts)
+                await Self.applyToHotkeyGate(event, source: hotkeySource)
             }
+        }
+    }
+
+    /// Toggle the hotkey source's cancel-key consumption gate so Esc is
+    /// swallowed only while a session is live. Driven from orchestrator
+    /// lifecycle events so cancellation paths (which also emit
+    /// `.sessionEnded`) close the gate without extra plumbing.
+    private static func applyToHotkeyGate(
+        _ event: OrchestratorEvent,
+        source: HotkeySourceMac
+    ) async {
+        switch event {
+        case .sessionStarted:
+            await source.setDictating(true)
+        case .sessionEnded:
+            await source.setDictating(false)
+        case .partial, .finalizing, .error:
+            break
         }
     }
 
