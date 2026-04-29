@@ -190,6 +190,27 @@ public actor Orchestrator {
         }
     }
 
+    /// Force-reset everything in response to a system-level interruption
+    /// (currently: `NSWorkspace.willSleepNotification` on Mac).
+    ///
+    /// Closes the current session if any, stops audio capture, cancels any
+    /// pending FSM timer, and resets the activation state machine. If a
+    /// session was live, emits one `.sessionEnded(injectedText: nil)` so the
+    /// HUD/menu/cancel-key gate clear via the existing event-consumer
+    /// plumbing. Idempotent — safe to call when already idle.
+    ///
+    /// We do **not** record usage for the interrupted session: the user
+    /// didn't release the key, and the audio they spoke pre-sleep was lost
+    /// when the OS suspended the WebSocket. Treating it like a cancel.
+    public func handleSystemSleep() async {
+        await cancelDictation()
+        if let token = timerToken {
+            await timerScheduler.cancel(token)
+            timerToken = nil
+        }
+        await stateMachine.reset()
+    }
+
     private func promoteToHandsFree() async {
         // Discard the speculative session: close without EOS, no inject.
         // Audio capture continues; we open a fresh hands-free session.
