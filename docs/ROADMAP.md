@@ -4,7 +4,7 @@
 | --- | --- |
 | Version | v2 |
 | Status | Pre-implementation, design phase |
-| Last updated | 2026-04-27 |
+| Last updated | 2026-04-29 |
 | Companion docs | [PRD.md](./PRD.md), [TECH_SPEC.md](./TECH_SPEC.md) |
 
 ---
@@ -14,7 +14,7 @@
 Three phases, ordered by personal-priority:
 
 1. **Phase 1 — macOS MVP** (active focus, **8–12 weeks** of focused effort)
-2. **Phase 2 — iOS keyboard extension** (~3–4 weeks after Phase 1, **gated on feasibility spike**)
+2. **Phase 2 — iOS keyboard extension** (~4–5 weeks after Phase 1; architecture decided by Phase 1.5 spike — host-app-recording flow)
 3. **Phase 3 — Linux/Wayland** (deferred; designed in detail when started)
 
 Effort estimates assume one developer working consistently, not full-time. Phase 1 estimate widened from v1's 6–8 weeks to account for the unknowns surfaced in the v2 design pass: floating overlay UI, usage tracking, sleep/wake handling, and the iOS feasibility spike.
@@ -91,10 +91,10 @@ Effort estimates assume one developer working consistently, not full-time. Phase
 - Notarization script and packaging.
 - README + landing page (or GitHub release page) with screenshots.
 - **Second-provider mock validation**: implement `STTMockProvider` end-to-end with Orchestrator to confirm provider abstraction holds. Bonus: skeletal `STTDeepgram` adapter.
-- **iOS feasibility spike** (1–2 weeks within this milestone): standalone keyboard extension prototype to verify mic + WebSocket + memory budget. Document findings; decide Phase 2 architecture before Phase 1 closes.
+- **iOS feasibility spike** — ✅ completed 2026-04-28. Result: in-extension recording is OS-blocked; Phase 2 uses host-app-recording flow. See [TECH_SPEC §8.3](./TECH_SPEC.md#83-phase-15-feasibility-spike-outcome--host-app-recording-is-primary).
 - Personal dogfood: 2 weeks of replacing Wispr Flow exclusively.
 
-**Exit criteria**: PRD §10 success criteria met. Memory under 200 MB across 8-hour workday. 100 dictations with zero data loss (cancellations and connection-lost-with-clear-error counted as not-data-loss). Feasibility spike has a concrete answer for Phase 2.
+**Exit criteria**: PRD §10 success criteria met. Memory under 200 MB across 8-hour workday. 100 dictations with zero data loss (cancellations and connection-lost-with-clear-error counted as not-data-loss). Feasibility spike answered (✅ completed; see above).
 
 ### Phase 1 risks
 
@@ -107,53 +107,68 @@ Effort estimates assume one developer working consistently, not full-time. Phase
 | Cancel-key consumption confuses tap behavior | Carefully scope the consumption to dictation-active states only; test in vim, terminal, password fields |
 | Hands-free per-utterance signal feels wrong in dogfood | (a)/(b)/(c) candidates documented; switch easily |
 | Sleep/wake breaks WebSocket in non-obvious ways | Treat reconnect as fresh session always; don't try to maintain across sleep |
-| iOS feasibility spike fails | Phase 2 redesign well-understood (host-app-recording flow); not a project-killer |
+| iOS feasibility spike fails | ✅ Resolved 2026-04-28 — spike confirmed in-extension recording is OS-blocked; Phase 2 redesigned around host-app-recording flow |
 
 ---
 
 ## Phase 2 — iOS keyboard extension
 
-**Goal**: same dictation experience adapted to iOS via custom keyboard.
+**Goal**: same dictation experience adapted to iOS, using the **host-app-recording flow** with URL-scheme handoff. Keyboard is a thin launcher + paster; the host app is the dictation surface.
 
-**Gated on**: Phase 1.5 feasibility spike outcome. If mic + WebSocket + 48 MB budget all pass in extension context, proceeds as designed below. If not, redesign to host-app-recording flow before Milestone 2.1.
+**Architecture decided** (Phase 1.5 spike, 2026-04-28): in-extension audio capture is blocked at the OS level on iOS — see [TECH_SPEC §8.3](./TECH_SPEC.md#83-phase-15-feasibility-spike-outcome--host-app-recording-is-primary). Phase 2 implements the redesigned flow; no further gating decision is pending.
 
 Starts after Phase 1 hits exit criteria and stabilizes for ~1 week of real use.
 
-### Milestone 2.1 — iOS host app (week 1)
+### Milestone 2.1 — iOS host app foundation (week 1)
 
-**Outcome**: host app compiles, settings work, App Group + Keychain Sharing wired.
+**Outcome**: host app compiles, settings work, App Group + Keychain Sharing wired, URL scheme registered.
 
 - `WhatchuSayiOS` Xcode project with host app + extension target.
-- App Group container + Keychain Sharing access group configured.
+- App Group container (`group.s900mhz.WhatchuSay`) + Keychain Sharing access group configured.
+- Custom URL scheme `whatchusay://` registered, with handler stub for `record?return=…&targetBundleID=…`.
 - Settings UI ported from Mac.
 - Privacy disclosure pane.
-- Onboarding flow including keyboard-install instructions.
+- Onboarding flow including keyboard-install + "Allow Full Access" instructions.
 - API key entry + test connection from host app.
 
-**Exit criteria**: host app installs from Xcode, settings persist, API key reads successfully from a stub extension.
+**Exit criteria**: host app installs from Xcode, settings persist, opening `whatchusay://record?return=…` from another app launches it and reaches the handler.
 
-### Milestone 2.2 — Keyboard extension (week 1–3)
+### Milestone 2.2 — Host-app dictation surface (week 1–3)
 
-**Outcome**: dictation works inside the extension, end-to-end.
+**Outcome**: full press-and-hold dictation works inside the host app, identical Mac experience adapted to touch.
+
+- iOS `AVAudioSession` setup in `Sources/Audio/AVAudioCapture.swift` (`.record` / `.measurement`).
+- Mic button surface with `UILongPressGestureRecognizer` driving `KeyboardActivationSource` → existing `ActivationStateMachine`.
+- Provider integration via shared `Sources/STTElevenLabs/` — unchanged from Mac.
+- VU meter + recording overlay (iOS analog of Mac's floating overlay).
+- On finalize: write transcript to App Group named pasteboard `group.s900mhz.WhatchuSay.transcript` and history SQLite; then open the return URL.
+- Cancellation parity with Mac (touch-up-outside or explicit cancel button).
+- Recent transcripts viewer in host (reads same shared SQLite).
+- Memory profile baseline for the host app.
+
+**Exit criteria**: launching the host via URL scheme, holding the mic, releasing → transcript lands on the named pasteboard and the host opens the return URL. Works in all-day personal use for 3+ days.
+
+### Milestone 2.3 — Keyboard extension (week 3–4)
+
+**Outcome**: thin keyboard extension closes the loop — launches host on tap, pastes on return.
 
 - Extension target with `RequestsOpenAccess`.
-- Mic button UI with `UILongPressGestureRecognizer`.
-- Audio capture in the extension (or host app, per spike outcome).
-- Provider integration via shared `Sources/STTElevenLabs/`.
-- Insert via `UITextDocumentProxy.insertText`.
-- Touch-up-outside cancellation.
-- Memory profiling — under 48 MB ceiling continuously.
-- State save/restore for when extension is killed.
-- Recent transcripts UI (read from shared SQLite).
+- `UIInputViewController` subclass with SwiftUI mic button.
+- Tap → `extensionContext?.open(URL(string: "whatchusay://record?…"))` with cached `targetBundleID` and best-available `return` URL.
+- On regain-focus: read named pasteboard → `UITextDocumentProxy.insertText` → mark consumed sentinel in App Group `UserDefaults`.
+- Brief "Discard" affordance (~600 ms) before auto-paste, per [TECH_SPEC §8.3.4](./TECH_SPEC.md#834-auto-paste-vs-explicit-confirm).
+- Recent transcripts strip (reads shared SQLite).
+- Memory profile — under 48 MB ceiling continuously (target ~22 MB per [TECH_SPEC §8.3.5](./TECH_SPEC.md#835-memory-budget-reset)).
 
-**Exit criteria**: dictation works in 5 different host apps. RSS stays under 45 MB across 20 dictations.
+**Exit criteria**: dictation round-trip (keyboard → host → keyboard → paste) works in 5 different host apps (Notes, Messages, Safari, Slack, a code editor like Working Copy). Extension RSS stays under 30 MB across 20 round-trips.
 
-### Milestone 2.3 — Polish & ship (week 3–4)
+### Milestone 2.4 — Polish & ship (week 4–5)
 
 **Outcome**: TestFlight beta, then App Store submission.
 
-- Onboarding polish — keyboard install instructions are the trickiest part of iOS UX.
-- "Allow Full Access" justification copy.
+- Onboarding polish — keyboard install + "Allow Full Access" + URL-scheme handoff are the trickiest part of iOS UX.
+- "Allow Full Access" justification copy (URL launching + App Group pasteboard read; **not** mic, since we don't record in the extension — this should help App Review).
+- Return-URL fallback UX when the originating app doesn't advertise an `x-source-app` URL.
 - TestFlight beta — solo first, then small cohort.
 - App Store submission with privacy policy and Full Access justification.
 
@@ -163,10 +178,12 @@ Starts after Phase 1 hits exit criteria and stabilizes for ~1 week of real use.
 
 | Risk | Mitigation |
 | --- | --- |
-| Spike outcome forces architecture change | Already planned; redesign known |
-| 48 MB ceiling violated in real use | Profile from start of 2.2; aggressive frame discarding if needed |
-| App Review rejects "Allow Full Access" justification | Pre-research approved patterns from competing dictation apps |
-| State recovery is awkward when extension is killed | Embrace it: lose in-flight audio gracefully |
+| Originating apps don't advertise a return URL | Fallback to "Open Wherever You Were" affordance in host; document expected behavior per app class |
+| Named-pasteboard race (extension reads before host writes) | "Consumed" sentinel + transcript-id check in App Group `UserDefaults`; insertText only on fresh entries |
+| User stays in host app instead of being returned | Acceptable degraded path — transcript is still on pasteboard; surface a "back to {app}" button explicitly |
+| 48 MB ceiling violated despite thin extension | Profile from start of 2.3; suspect SwiftUI scene complexity first |
+| App Review rejects "Allow Full Access" justification | Justification is stronger than competitors' (no mic in extension); pre-research approved patterns |
+| iOS kills host app between record and return | Persist transcript to SQLite *before* opening return URL; extension reads from SQLite as backup if pasteboard is empty |
 
 ---
 

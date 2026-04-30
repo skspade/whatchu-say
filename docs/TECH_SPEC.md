@@ -4,7 +4,7 @@
 | --- | --- |
 | Version | v2 |
 | Status | Pre-implementation, design phase |
-| Last updated | 2026-04-27 |
+| Last updated | 2026-04-29 |
 | Companion docs | [PRD.md](./PRD.md), [ROADMAP.md](./ROADMAP.md) |
 
 ---
@@ -38,7 +38,7 @@
 
 ### Memory implications
 
-Swift binaries are heavier than Rust binaries (~25 MB Swift runtime baseline vs. ~10 MB for Rust). On macOS this is offset by SwiftUI being a system framework. On iOS the keyboard extension has a ~48 MB hard ceiling — see §11 for breakdown and the Phase 1.5 feasibility spike requirement.
+Swift binaries are heavier than Rust binaries (~25 MB Swift runtime baseline vs. ~10 MB for Rust). On macOS this is offset by SwiftUI being a system framework. On iOS the keyboard extension has a ~48 MB hard ceiling — see §11 for breakdown. Under the host-app-recording architecture (decided by the Phase 1.5 spike, see §8.3) the extension is thin and the budget has substantial headroom.
 
 ---
 
@@ -342,12 +342,11 @@ public struct AudioFrame: Sendable {
 
 ### 5.4 iOS implementation
 
-Same `AVAudioCapture` class with conditional compilation:
+Same `AVAudioCapture` class with conditional compilation, **running in the host app** (not the keyboard extension — see §8.3 for why):
 
 - `AVAudioSession` configured: category `.record`, mode `.measurement`.
-- Background audio entitlement on the keyboard extension.
-- Permission flow: standard iOS mic permission prompt on first capture.
-- **Capability subject to Phase 1.5 feasibility spike** — if mic access from keyboard extension is blocked, this implementation moves to the host app with an IPC bridge.
+- Permission flow: standard iOS mic permission prompt on first capture (against the host app's bundle ID).
+- The keyboard extension does not link or invoke `AVAudioCapture`; it has no `NSMicrophoneUsageDescription`.
 
 ### 5.5 RMS for the VU meter
 
@@ -514,8 +513,8 @@ The 8-character threshold is a starting point — may tune during dogfood. Reaso
 
 | Target | Purpose |
 | --- | --- |
-| Host app | Settings, onboarding, API key, history viewer, usage stats |
-| Keyboard extension | Dictation surface (subject to feasibility spike) |
+| Host app | Settings, onboarding, API key, history viewer, usage stats — **and the dictation surface itself** (recording + STT + finalize) |
+| Keyboard extension | Thin launcher: mic button → URL-scheme open of host; pasteboard read + `insertText` paste-back on return |
 
 ### 8.2 Shared state
 
@@ -523,18 +522,105 @@ The 8-character threshold is a starting point — may tune during dogfood. Reaso
 - **Keychain Sharing access group**: API key.
 - **Identical Swift Package targets** ensure no logic divergence.
 
-### 8.3 Phase 1.5 feasibility spike (gating Phase 2)
+### 8.3 Phase 1.5 feasibility spike outcome — host-app-recording is primary
 
-Before any Phase 2 milestone work, verify in a small standalone keyboard extension prototype:
+Run on iPhone 17 Pro / iOS 26.4 on 2026-04-28. The four gating questions and their answers:
 
-1. Can the extension request and receive microphone permission?
-2. Can it instantiate `AVAudioEngine` and capture audio at 16 kHz?
-3. Can it open and maintain a `URLSessionWebSocketTask` connection while the keyboard is presented?
-4. Does memory stay under the ~48 MB ceiling with all of the above active?
+| # | Question | Result |
+| --- | --- | --- |
+| 1 | Can the extension receive mic permission and capture audio? | ❌ **Blocked at OS level.** `CMSUtilities` denies the audio sandbox extension regardless of `RequestsOpenAccess`, "Allow Full Access," or `NSMicrophoneUsageDescription`. `AVAudioEngine.start()` returns `kAudioUnitErr` 2003329396 (`'what'`); console logs `unable to make sandbox extension: [22: Invalid argument]`. |
+| 2 | Can `AVAudioEngine` instantiate and capture in extension context? | ❌ Cannot reach a working state without (1). |
+| 3 | Can `URLSessionWebSocketTask` open + stream from extension? | ✅ Reached `committed_transcript` against ElevenLabs realtime endpoint. |
+| 4 | Memory under ~48 MB ceiling? | ⚠️ Spike peaked at 67 MB during the *attempted* audio path. Under the redesigned (no-recording) extension this drops substantially; budget revalidates during 2.2. |
 
-Outcomes:
-- **All four pass**: Phase 2 proceeds as designed.
-- **Any fail**: Phase 2 redesigns. Likely shape: keyboard has a mic button that triggers a switch to the host app via a custom URL scheme; host app records and transcribes; result is placed on clipboard; user manually pastes back into the original app. Worse UX, but functional.
+**Architectural verdict**: in-extension recording is not achievable on current iOS. This is a hard platform restriction, not a configuration miss; Wispr Flow — the leading dictation keyboard — uses the same workaround ("when you tap Start Flow from the third-party keyboard, it takes you to the full Wispr Flow app, activates the Flow Session, and then hops you back to where you were", per [Zapier's deep dive](https://zapier.com/blog/wispr-flow/)).
+
+The previously contingent **host-app-recording flow is now the primary architecture.**
+
+#### 8.3.1 URL-scheme handoff
+
+```
+[whatchu-say keyboard]                [WhatchuSayiOS host app]
+       │
+       │ user taps mic button
+       │
+       ├─── open URL ────────────────►
+       │   whatchusay://record
+       │     ?return={originating app's URL or x-source-app}
+       │     ?targetBundleID={cached bundle ID}
+       │
+       │                              [Recording UI presents]
+       │                              [User press-and-holds, dictates]
+       │                              [AVAudioEngine + STTElevenLabs as on Mac]
+       │                              [Final arrives, written to App Group:
+       │                                  pasteboard + history SQLite]
+       │                              [Host opens return URL]
+       │  ◄──── return ─────────────────
+       │
+       │ keyboard regains focus
+       │ (UIApplication will-enter-foreground in host;
+       │  on extension side, the input view's
+       │  viewDidAppear / textDidChange equivalents fire)
+       │
+       │ keyboard reads App Group pasteboard
+       │ inserts via UITextDocumentProxy.insertText
+       │ marks the pasteboard entry consumed
+       │
+       └─── done ────►
+```
+
+URL scheme: `whatchusay://`. Single endpoint at v1 — `record` — with two query params: `return` (the URL to return to, typically `x-source-app://` or whatever the originating app advertises) and `targetBundleID` (cached so the extension can recover focus correctly even if iOS loses the source-app context).
+
+#### 8.3.2 Where the work actually lives
+
+| Component | Lives in | Notes |
+| --- | --- | --- |
+| `AVAudioEngine` capture | Host app | Same `Sources/Audio/AVAudioCapture.swift` as Mac, with iOS `AVAudioSession` setup |
+| `STTElevenLabs` session | Host app | Identical to Mac — provider abstraction holds |
+| `Orchestrator` | Host app | Same actor, same FSM-driven flow |
+| `KeyboardActivationSource` (sketched at `Sources/PlatformApple/iOS/`) | Host app | Drives the FSM from a `UILongPressGestureRecognizer` on the host's mic button; same shape as the Mac hotkey source |
+| Mic-button-launches-URL | Extension | Tiny — `UIInputViewController` subclass with a SwiftUI mic button that calls `extensionContext?.open(url:completionHandler:)` |
+| Pasteboard read + `insertText` | Extension | `KeyboardExtensionInjector` sketch holds, but reads from App Group `UIPasteboard` rather than receiving text in-process |
+| App Group container | Both | `group.s900mhz.WhatchuSay` — pasteboard, history, settings, audit |
+| Mic permission (`NSMicrophoneUsageDescription`) | Host app **only** | Extension does not record, so does not need this |
+| `RequestsOpenAccess` | Extension | Required to open URL schemes and read App Group state |
+
+#### 8.3.3 Pasteboard contract
+
+We can't use `UIPasteboard.general` for the handoff — that would clobber whatever the user already has on their clipboard, violating the "preserve clipboard" convention from the Mac flow. Use a **private named pasteboard** scoped to the App Group:
+
+```swift
+let pb = UIPasteboard(name: UIPasteboard.Name("group.s900mhz.WhatchuSay.transcript"), create: true)
+pb?.setValue(transcript, forPasteboardType: "public.utf8-plain-text")
+```
+
+The keyboard reads from that named pasteboard on regain-focus, inserts via `insertText`, and marks the entry consumed (overwrite with empty + bump a "consumed" sentinel in App Group `UserDefaults`) so a stale transcript can't double-insert. The user's general clipboard is never touched.
+
+#### 8.3.4 Auto-paste vs. explicit confirm
+
+Auto-paste on return is the chosen behavior — it's the natural completion of the user's "tap mic" intent, not a separate automatic event. The full chain is *user-initiated*: tap mic → speak → release → return → paste. The user can suppress the paste with a small "Discard" affordance the keyboard shows briefly on return; if they don't act, the paste happens after a short visible window (~600 ms) so they see the transcript before it lands.
+
+This is consistent with the firm decision against auto-anything (no VAD, no auto-exit, no audio replay) — those are *system-initiated* automation. Paste-on-return is the user's own intent completing.
+
+#### 8.3.5 Memory budget reset
+
+Original budget assumed in-extension audio + WebSocket: ~35 MB target / ~48 MB ceiling. Under host-app-recording the extension does only:
+
+| Component | Estimate |
+| --- | --- |
+| Swift runtime (per-process) | ~12 MB |
+| Minimal SwiftUI keyboard UI | ~5 MB |
+| App Group pasteboard read | ~1 MB |
+| App heap | ~4 MB |
+| **Total** | **~22 MB** |
+
+Comfortably inside the ceiling with ~26 MB headroom. Profile from week one of Milestone 2.2; if anything pushes us over, suspect SwiftUI scene complexity first.
+
+#### 8.3.6 What this does *not* solve
+
+- **Hands-free** still not viable. Same reason as before: the originating app's text field loses focus when the user leaves for the host app, so by the time we'd return continuously there's no insertion target. Excluded from v1 iOS.
+- **Background/lock screen recording** — unchanged; we don't try.
+- **Direct keyboard-to-network audio streaming** — explicitly out, since recording is.
 
 ### 8.4 Hands-free mode on iOS
 
@@ -705,18 +791,21 @@ The user must acknowledge this on first run (records in `PrivacyConfig.hasReadDi
 
 Comfortably under the 200 MB ceiling.
 
-### 11.2 iOS keyboard extension (subject to feasibility spike)
+### 11.2 iOS keyboard extension (host-app-recording architecture)
+
+The extension is thin — no `AVAudioEngine`, no `URLSessionWebSocketTask` — so the budget shifted from the original ~35 MB target to ~22 MB. Authoritative table lives in §8.3.5; reproduced here for the §11 budget summary:
 
 | Component | Estimate |
 | --- | --- |
 | Swift runtime (per-process) | ~12 MB |
-| AVAudioEngine | ~4 MB |
-| URLSession WebSocket | ~6 MB |
-| Minimal UIKit UI | ~5 MB |
-| App heap | ~8 MB |
-| **Total** | **~35 MB** |
+| Minimal SwiftUI keyboard UI | ~5 MB |
+| App Group pasteboard read | ~1 MB |
+| App heap | ~4 MB |
+| **Total** | **~22 MB** |
 
-Inside the ~48 MB ceiling with ~13 MB headroom. **Profile from week one** of Phase 2 implementation; if budget breaks, the host-app-recording flow becomes the fallback.
+Comfortably inside the ~48 MB ceiling with ~26 MB headroom. **Profile from week one** of Milestone 2.3; if anything pushes us over, suspect SwiftUI scene complexity first.
+
+The host app has its own budget (settings + recording + STT) — measured during 2.2; documented after dogfood.
 
 ---
 

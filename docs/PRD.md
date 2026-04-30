@@ -4,7 +4,7 @@
 | --- | --- |
 | Version | v2 |
 | Status | Pre-implementation, design phase |
-| Last updated | 2026-04-27 |
+| Last updated | 2026-04-29 |
 | Primary platforms | macOS (priority), iOS (Phase 2) |
 | Deferred | Linux/Wayland (Phase 3) |
 | Companion docs | [TECH_SPEC.md](./TECH_SPEC.md), [ROADMAP.md](./ROADMAP.md) |
@@ -48,10 +48,13 @@ A push-to-talk voice-to-text dictation tool that feels invisible. Press a key, t
 
 ### 3.3 Phase 2 goals (iOS)
 
-- iOS keyboard extension with mic button and press-and-hold dictation.
-- Shared Swift core with Mac (provider abstraction, audio capture, orchestration).
-- Host app for settings, API key entry, and history viewer.
-- **Phase 2 is gated on a feasibility spike** at the end of Phase 1 verifying that keyboard extensions can (a) access the microphone and (b) maintain a WebSocket connection within the ~48 MB process budget. Architecture redesigns to a host-app-recording flow if either is blocked.
+iOS architecture: **host-app-recording flow with URL-scheme handoff.** The keyboard extension is a thin launcher; the host app is the actual dictation surface. This matches Wispr Flow's published architecture and is forced by an iOS platform restriction — see TECH_SPEC §8.3 for the spike outcome that established this.
+
+- **Keyboard extension** (thin): mic button, recent-transcripts strip, deep-links to host app via custom URL scheme on tap, pastes the returned transcript via `UITextDocumentProxy.insertText` when the user comes back to the keyboard.
+- **Host app** (the dictation surface): full press-and-hold mic UI; runs `AVAudioEngine` + `STTElevenLabs` against the same shared Swift core as the Mac app; on finalize writes transcript to the App Group container and follows the return-URL back to the originating app.
+- **Shared Swift core** with Mac (provider abstraction, audio capture, orchestration) compiles into the host app, not the extension.
+- **Settings, API key entry, and history viewer** live in the host app, persisted via App Group + Keychain Sharing access group.
+- **Phase 1.5 feasibility spike outcome (2026-04-28)**: in-extension recording is blocked at the OS level (`CMSUtilities` denies the audio sandbox extension; `AVAudioEngine.start()` returns `'what'` / 2003329396); App Group + `URLSessionWebSocketTask` from extension context both work cleanly. The architecture above is the redesign that resulted; treat it as primary, not contingency.
 
 ### 3.4 Non-functional goals
 
@@ -186,17 +189,38 @@ Timing values (250 ms / 300 ms) are configurable in advanced settings.
 5. Return to host app: paste ElevenLabs API key (stored in shared Keychain access group).
 6. "Try it now" — opens a sandbox text field and walks through the keyboard switch + press-and-hold.
 
-### 6.7 iOS keyboard extension dictation (Phase 2 — pending feasibility spike)
+### 6.7 iOS keyboard extension dictation (Phase 2)
 
-1. User is in some app's text field; switches to whatchu-say keyboard via globe key.
-2. Sees mic button, optional recent transcripts UI above it.
-3. Presses and holds mic button (UILongPressGestureRecognizer, haptic on activation).
-4. Releases → audio sent for finalization → text inserted via `UITextDocumentProxy.insertText`.
-5. Continues using whatchu-say keyboard for more dictations, or globe-switches back.
+iOS uses the host-app-recording flow. The keyboard never records; it launches the host app, which records, then returns control to the originating app with the transcript on the App Group clipboard for the keyboard to paste.
 
-**Hands-free mode is not viable in keyboard extensions** (extension is dismissed when the host app's text field loses focus). For v1 iOS: not offered.
+```
+[in some app's text field]
+  ↓ user switches to whatchu-say keyboard via globe key
+[whatchu-say keyboard presented]
+  ↓ user taps mic button (single tap, not press-hold)
+[host app launches via custom URL scheme:
+   whatchusay://record?return={originating-app-url}]
+[host app: full press-and-hold dictation UI, VU meter, overlay equivalent]
+  ↓ user holds, talks, releases
+[host streams to ElevenLabs, gets Final transcript]
+  ↓ writes transcript to App Group pasteboard + history SQLite
+  ↓ host opens the return URL → user returns to originating app
+[whatchu-say keyboard regains focus]
+  ↓ keyboard observes the App Group pasteboard, sees the new transcript
+  ↓ inserts via UITextDocumentProxy.insertText at the cursor
+[done — tray-equivalent indicator briefly confirms paste; keyboard idle]
+```
 
-If the Phase 1.5 feasibility spike fails (mic or WebSocket blocked in extension context), Phase 2 redesigns to a "tap mic in keyboard → switch to host app → record there → switch back with text on clipboard" flow. Spec adjusts at that point.
+Cancellation is per-stage:
+- Inside the host app (during recording): same Esc-equivalent cancel as Mac.
+- After return (clipboard ready, before paste): the keyboard surfaces a small "Discard" affordance alongside the auto-paste, so the user can suppress the insert if they changed their mind on the way back.
+
+Notes:
+
+- **Press-and-hold lives in the host app**, not the keyboard. The keyboard's mic button is a single-tap launcher; the host's mic surface is where the gesture happens. This avoids the "long-press in a 240px-tall view" UX that would otherwise be cramped.
+- **Auto-paste on return** is the natural completion of the user's "I tapped the mic" intent — not a violation of the no-auto-anything firm decision. The user's explicit action chains: tap mic → speak → release → return → paste. Each link is in service of the same originating action, not a side effect.
+- **Hands-free mode is not viable.** The keyboard is dismissed when the originating app's text field loses focus, so even if the host could maintain a session, the paste-back target disappears. For v1 iOS: not offered.
+- **Permission model**: mic permission is granted to the host app's bundle ID, not the extension's. Since the extension never records, the extension does not need `NSMicrophoneUsageDescription`. It does need `RequestsOpenAccess` to be allowed to launch URL schemes and read the App Group pasteboard.
 
 ### 6.8 Failure modes (what the user sees)
 
@@ -238,7 +262,7 @@ If the Phase 1.5 feasibility spike fails (mic or WebSocket blocked in extension 
   - `RequestsOpenAccess` (keyboard extension full access)
 - **Distribution**: App Store. TestFlight beta first.
 - **App Review considerations**: explicit, well-justified explanation for "Allow Full Access" — mic + STT API endpoint connection.
-- **Phase 2 prerequisite**: feasibility spike (see §3.3) — architecture is provisional until verified.
+- **Phase 2 architecture**: host-app-recording flow with URL-scheme handoff (see §3.3 and TECH_SPEC §8.3). Decided by Phase 1.5 spike (2026-04-28); not provisional.
 
 ### 7.3 Linux / Wayland (Phase 3, deferred)
 
@@ -290,7 +314,7 @@ Phase 3 prerequisites: Phase 1 + 2 stable; validated Swift D-Bus story for porta
 - Latency feels comparable to Wispr Flow on the same network (subjective, dogfood-tuned).
 - Memory stays under 200 MB across an 8-hour workday.
 - Provider abstraction validated by a second adapter implementation (mock or thin Deepgram WebSocket adapter) — proves the trait is the right shape.
-- Phase 2 success: dictation works reliably in 5 different iOS apps (Notes, Messages, Safari, Slack, a code editor like Working Copy) over 1 week of personal use — pending feasibility spike validation.
+- Phase 2 success: dictation works reliably in 5 different iOS apps (Notes, Messages, Safari, Slack, a code editor like Working Copy) over 1 week of personal use, via the host-app-recording handoff.
 
 ## 11. Resolved decisions (2026-04-27)
 
@@ -301,7 +325,7 @@ Phase 3 prerequisites: Phase 1 + 2 stable; validated Swift D-Bus story for porta
 | 3 | Final-before-EOS handling | Disable provider-side endpoint detection; Final only after our EOS |
 | 4 | Latency NFR | No numerical target. "Subjectively snappy" + dogfood judgment |
 | 5 | Cost/usage surface | Yes — settings stats + menubar indicator |
-| 6 | iOS feasibility spike | Schedule Day-1 spike at end of Phase 1; Phase 2 gated on outcome |
+| 6 | iOS feasibility spike | Completed 2026-04-28: in-extension recording is OS-blocked. Phase 2 uses host-app-recording flow (TECH_SPEC §8.3) |
 | 7 | Sleep/wake behavior | Auto-reconnect on wake |
 | 8 | VAD / auto-exit | Drop WebRTC VAD entirely. Use RMS for VU meter. **Drop all auto-exit** — hands-free runs until user explicitly exits |
 
