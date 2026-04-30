@@ -6,24 +6,12 @@ import PlatformApple
 struct WhatchuSayMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    /// SwiftUI's `App` requires a `Scene`; with `LSUIElement = YES` and an
+    /// AppKit-owned `NSStatusItem`, we have nothing to put in a window. An
+    /// empty `Settings` scene satisfies the type system without ever being
+    /// presented (no Settings menu in agent apps).
     var body: some Scene {
-        MenuBarExtra {
-            MenuContentView(
-                state: appDelegate.state,
-                recentTranscripts: appDelegate.recentTranscripts,
-                errorLog: appDelegate.errorLog,
-                onSetKey: appDelegate.runSetKeyFlow,
-                onCopyTranscript: AppCoordinator.copyToPasteboard,
-                onClearTranscripts: appDelegate.runClearRecentTranscripts,
-                onCopyErrorEntry: AppCoordinator.copyToPasteboard,
-                onClearErrorLog: appDelegate.runClearErrorLog,
-                onDismissError: appDelegate.dismissLastError,
-                onOpenPermission: PermissionLauncher.open
-            )
-        } label: {
-            MenuBarLabelView(state: appDelegate.state)
-        }
-        .menuBarExtraStyle(.menu)
+        Settings { EmptyView() }
     }
 }
 
@@ -35,10 +23,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let keychain = KeychainAPIKeyStore()
     private let provider = "elevenlabs"
     private var coordinator: AppCoordinator?
+    private var statusItemController: StatusItemController?
     private var currentKey: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("[WhatchuSay] applicationDidFinishLaunching")
+        installStatusItem()
         Task { @MainActor in
             await self.bootstrap()
         }
@@ -47,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         recentTranscripts.flushPendingWrites()
         errorLog.flushPendingWrites()
+        statusItemController?.uninstall()
     }
 
     /// Manually clear the persistent error indicator (yellow menubar icon
@@ -57,6 +48,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func dismissLastError() {
         state.lastError = nil
         state.permissionIssue = nil
+    }
+
+    /// Build and install the menu-bar status item synchronously so the
+    /// icon is visible immediately — even before `bootstrap()` finishes
+    /// reading the keychain or hydrating the stores. The menu rebuilds on
+    /// every open via `NSMenuDelegate`, so it will reflect fresh state as
+    /// soon as bootstrap completes.
+    private func installStatusItem() {
+        let controller = StatusItemController(
+            state: state,
+            recentTranscripts: recentTranscripts,
+            errorLog: errorLog,
+            handlers: StatusItemController.Handlers(
+                onSetKey: { [weak self] in self?.runSetKeyFlow() },
+                onCopyTranscript: AppCoordinator.copyToPasteboard,
+                onClearTranscripts: { [weak self] in self?.runClearRecentTranscripts() },
+                onCopyErrorEntry: AppCoordinator.copyToPasteboard,
+                onClearErrorLog: { [weak self] in self?.runClearErrorLog() },
+                onDismissError: { [weak self] in self?.dismissLastError() },
+                onOpenPermission: PermissionLauncher.open
+            )
+        )
+        controller.install()
+        statusItemController = controller
     }
 
     /// Resolve an API key from Keychain (preferred) or the env var
@@ -167,57 +182,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         alert.runModal()
-    }
-}
-
-// MARK: - Menu views
-
-private struct MenuBarLabelView: View {
-    let state: AppState
-    var body: some View {
-        Image(systemName: iconName(for: state))
-            .foregroundStyle(iconTint(for: state))
-    }
-}
-
-private struct MenuContentView: View {
-    let state: AppState
-    let recentTranscripts: RecentTranscriptsStore
-    let errorLog: ErrorLogStore
-    let onSetKey: () -> Void
-    let onCopyTranscript: (TranscriptEntry) -> Void
-    let onClearTranscripts: () -> Void
-    let onCopyErrorEntry: (ErrorLogEntry) -> Void
-    let onClearErrorLog: () -> Void
-    let onDismissError: () -> Void
-    let onOpenPermission: (PermissionDeepLink) -> Void
-
-    var body: some View {
-        Text(statusLabel(for: state))
-        Divider()
-        Button(setKeyMenuTitle(for: state)) { onSetKey() }
-        Divider()
-        RecentTranscriptsMenu(
-            entries: recentTranscripts.entries,
-            onCopy: onCopyTranscript,
-            onClear: onClearTranscripts
-        )
-        Divider()
-        ErrorLogMenu(
-            entries: errorLog.entries,
-            onCopy: onCopyErrorEntry,
-            onClear: onClearErrorLog
-        )
-        if let error = state.lastError {
-            Divider()
-            Text("Error: \(error)").font(.caption).foregroundStyle(.red)
-            if let permission = state.permissionIssue {
-                Button(permission.buttonLabel) { onOpenPermission(permission) }
-            }
-            Button("Dismiss Error") { onDismissError() }
-        }
-        Divider()
-        Button("Quit") { NSApp.terminate(nil) }.keyboardShortcut("q")
     }
 }
 

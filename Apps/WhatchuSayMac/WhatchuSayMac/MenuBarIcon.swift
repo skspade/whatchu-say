@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Pure presentation helpers for the menu-bar icon and menu strings.
@@ -26,6 +27,19 @@ func iconTint(for state: AppState) -> Color {
         return .yellow
     case .idle, .listening:
         return state.lastError == nil ? .primary : .yellow
+    }
+}
+
+/// AppKit peer of `iconTint(for:)` for the `NSStatusBarButton.contentTintColor`
+/// path. Returns `nil` for the default (template-image) appearance, or
+/// `.systemYellow` for the attention state. Kept structurally parallel to
+/// `iconTint(for:)` so the two cannot drift.
+func iconTintColor(for state: AppState) -> NSColor? {
+    switch state.status {
+    case .needsSetup, .startupFailed:
+        return .systemYellow
+    case .idle, .listening:
+        return state.lastError == nil ? nil : .systemYellow
     }
 }
 

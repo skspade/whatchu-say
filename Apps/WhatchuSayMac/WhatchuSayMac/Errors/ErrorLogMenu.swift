@@ -1,50 +1,14 @@
-import SwiftUI
+import Foundation
 
-/// Menu-bar surface for the error-log buffer. Renders a flat list of the
-/// top-N entries inline plus an "Older…" submenu when overflow exists.
-/// Clicking an entry copies its text to the clipboard so the user can
-/// paste it into a bug report or scratchpad — same UX shape as
-/// `RecentTranscriptsMenu`.
-struct ErrorLogMenu: View {
-    let entries: [ErrorLogEntry]
-    let onCopy: (ErrorLogEntry) -> Void
-    let onClear: () -> Void
-
+/// Pure presentation helpers for the menu-bar "Recent Errors" surface.
+///
+/// Exposes the truncation/labelling rule and the visible-vs-overflow split
+/// so the AppKit menu builder (`StatusItemController`) and unit tests can
+/// call them without instantiating any UI. Same UX shape as
+/// `RecentTranscriptsMenu`; clicking an entry copies its text to the
+/// clipboard for pasting into a bug report or scratchpad.
+enum ErrorLogMenu {
     static let labelMaxLength = 80
-
-    var body: some View {
-        Section("Recent Errors") {
-            if entries.isEmpty {
-                Text("No recent errors")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(Self.visibleEntries(from: entries)) { entry in
-                    entryButton(entry)
-                }
-                let overflow = Self.overflowEntries(from: entries)
-                if !overflow.isEmpty {
-                    Menu("Older…") {
-                        ForEach(overflow) { entry in
-                            entryButton(entry)
-                        }
-                    }
-                }
-                Divider()
-                Button("Clear Recent Errors", role: .destructive) {
-                    onClear()
-                }
-            }
-        }
-    }
-
-    private func entryButton(_ entry: ErrorLogEntry) -> some View {
-        Button(Self.label(for: entry, maxLength: Self.labelMaxLength)) {
-            onCopy(entry)
-        }
-        .help(entry.text)
-    }
-
-    // MARK: - Helpers (internal so unit tests can drive them)
 
     /// Format an entry as `HH:mm  text…` for the menu row, truncated to
     /// `maxLength` characters total. The timestamp prefix gives chronology
