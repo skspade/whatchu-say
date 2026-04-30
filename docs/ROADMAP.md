@@ -3,8 +3,8 @@
 | Field | Value |
 | --- | --- |
 | Version | v2 |
-| Status | Phase 1 in implementation — Mac engine done, shell incomplete (~50% overall) |
-| Last updated | 2026-04-29 |
+| Status | Phase 1 in implementation — Mac engine done, shell incomplete (~55% overall) |
+| Last updated | 2026-04-30 |
 | Companion docs | [PRD.md](./PRD.md), [TECH_SPEC.md](./TECH_SPEC.md) |
 
 > **Status legend** (used in milestone bullets below): ✅ done · ⚠️ partial / shim · ❌ not done · ⏳ pending validation
@@ -62,7 +62,7 @@ Effort estimates assume one developer working consistently, not full-time. Phase
 
 **Outcome**: app handles permissions cleanly, has a usable settings UI, has the floating overlay, and supports cancellation.
 
-**Status (2026-04-29)**: ~30% — overlay (HUD), Esc-cancel, and Keychain API-key are in. No Settings window, no onboarding, no privacy pane, no per-app override UI, no permission-fix-it links. This is the largest gap in Phase 1.
+**Status (2026-04-30)**: ~45% — overlay (HUD), Esc-cancel, Keychain API-key, and permission fix-it deep links are in. No Settings window, no onboarding, no privacy pane, no per-app override UI. Settings/onboarding/privacy is the largest remaining gap in Phase 1.
 
 - ❌ First-run onboarding flow with permission status panes.
 - ❌ Privacy disclosure pane on first run.
@@ -71,7 +71,7 @@ Effort estimates assume one developer working consistently, not full-time. Phase
 - ✅ **Floating overlay UI** (`Sources/PlatformApple/Mac/Overlay/`): NSPanel + VU meter view + lifecycle integration. *(Implemented under `Apps/WhatchuSayMac/WhatchuSayMac/HUD/` rather than the originally planned path.)*
 - ✅ **Cancellation flow**: second `CGEventTap` filter for cancel key; consume only during dictation states; orchestrator handles `.cancelDictation`. *(Gate driven by `setDictating(_:)` from orchestrator session events.)*
 - ⚠️ Per-app injection override UI. *(`StrategySelector.perAppOverrides` infrastructure exists; no UI to edit it.)*
-- ❌ Permission-fix-it deep links to System Settings. *(`HotkeySourceError.accessibilityDenied` is thrown but not surfaced with an "Open System Settings" action.)*
+- ✅ Permission-fix-it deep links to System Settings. *(`PermissionDeepLink` covers Accessibility and Microphone panes; `HotkeySourceError.accessibilityDenied` and orchestrator `.permissionDenied(.microphone)` both route into the menubar fix-it button.)*
 
 **Exit criteria**: a fresh user account can install, walk through onboarding (including privacy disclosure), and dictate within 5 minutes. Cancellation works in both press-hold and (stub) hands-free.
 
@@ -79,13 +79,13 @@ Effort estimates assume one developer working consistently, not full-time. Phase
 
 **Outcome**: double-tap-toggle works; provider failures surface cleanly; sleep/wake handled.
 
-**Status (2026-04-29)**: ~55% — FSM hands-free, sleep/wake, empty-result handling, yellow icon + error log all in. Hands-free per-utterance flush, audio-device disconnect recovery, and permission fix-it links still missing; reconnect path lacks a dedicated "lost" toast.
+**Status (2026-04-30)**: ~70% — FSM hands-free, sleep/wake, empty-result handling, yellow icon + error log, permission fix-it links, and audio-device disconnect recovery all in. Hands-free per-utterance flush still missing; reconnect path lacks a dedicated "lost" toast.
 
 - ✅ Double-tap toggle activation mode with full state machine integration.
 - ❌ **Hands-free per-utterance boundary signal**: implement candidate (a) — quick double-tap inside hands-free flushes current utterance and continues. Validate via dogfood; switch to (b) or (c) if (a) feels wrong. *(FSM treats single keyDown in `handsFree` as exit, not flush-and-continue. Candidate (a) not yet attempted.)*
 - ⚠️ **Reconnect policy**: fail-fast — no audio replay, mid-utterance drops surface as toast, user retries manually. *(No replay — good. Drops surface as generic `.error` event into menubar/error log; no dedicated "lost" toast UX.)*
-- ⚠️ Error toasts and degraded-state UI (yellow tray icon, fix-it links). *(Yellow icon ✅, persistent recent-errors menu ✅, manual dismiss ✅, lifecycle clear on successful inject ✅. No fix-it deep links.)*
-- ❌ Audio device disconnect recovery. *(`AVAudioCapture` does not subscribe to `AVAudioEngineConfigurationChangeNotification` or route-change notifications.)*
+- ✅ Error toasts and degraded-state UI (yellow tray icon, fix-it links). *(Yellow icon ✅, persistent recent-errors menu ✅, manual dismiss ✅, lifecycle clear on successful inject ✅, permission fix-it deep links ✅. No transient toast UI — the persistent menubar surface replaces it.)*
+- ✅ Audio device disconnect recovery. *(`AudioConfigurationObserver` subscribes to `AVAudioEngineConfigurationChange` and dispatches into `Orchestrator.handleAudioInterruption()`, which yields a clear `.error` event then tears the session down so the user retries against the new device.)*
 - ✅ **Sleep/wake observer**: graceful close on sleep; transparent reconnect on next activation. *(Wake intentionally not observed — next session opens fresh.)*
 - ✅ Empty result handling (silent — no notification, no inject).
 
