@@ -11,9 +11,12 @@ struct WhatchuSayMacApp: App {
             MenuContentView(
                 state: appDelegate.state,
                 recentTranscripts: appDelegate.recentTranscripts,
+                errorLog: appDelegate.errorLog,
                 onSetKey: appDelegate.runSetKeyFlow,
                 onCopyTranscript: AppCoordinator.copyToPasteboard,
                 onClearTranscripts: appDelegate.runClearRecentTranscripts,
+                onCopyErrorEntry: AppCoordinator.copyToPasteboard,
+                onClearErrorLog: appDelegate.runClearErrorLog,
                 onDismissError: appDelegate.dismissLastError
             )
         } label: {
@@ -27,6 +30,7 @@ struct WhatchuSayMacApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let state = AppState()
     let recentTranscripts = RecentTranscriptsStore()
+    let errorLog = ErrorLogStore()
     private let keychain = KeychainAPIKeyStore()
     private let provider = "elevenlabs"
     private var coordinator: AppCoordinator?
@@ -41,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         recentTranscripts.flushPendingWrites()
+        errorLog.flushPendingWrites()
     }
 
     /// Manually clear the persistent error indicator (yellow menubar icon
@@ -59,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard coordinator == nil else { return }
 
         await recentTranscripts.load()
+        await errorLog.load()
 
         let stored = await readStoredKey()
         let envKey = ProcessInfo.processInfo.environment["ELEVENLABS_API_KEY"]?.nonEmpty
@@ -84,6 +90,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recentTranscripts.clear()
     }
 
+    /// Show a confirm alert; on accept, wipe the error-log buffer from
+    /// memory and disk.
+    func runClearErrorLog() {
+        let alert = NSAlert()
+        alert.messageText = "Clear all recent errors?"
+        alert.informativeText = "This deletes the local error log. The action can't be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Clear")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        errorLog.clear()
+    }
+
     /// Show the API-key prompt and, on save, write to Keychain and restart
     /// the coordinator. Routed from the menu item.
     func runSetKeyFlow() {
@@ -97,7 +116,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 try await keychain.write(provider: provider, key: newKey)
             } catch {
-                presentError("Could not save API key", message: String(describing: error))
+                let message = String(describing: error)
+                errorLog.record(text: "Keychain write failed: \(message)")
+                presentError("Could not save API key", message: message)
                 return
             }
             await bringUpCoordinator(apiKey: newKey)
@@ -112,7 +133,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             coordinator = nil
         }
         currentKey = apiKey
-        let coord = AppCoordinator(apiKey: apiKey, state: state, recentTranscripts: recentTranscripts)
+        let coord = AppCoordinator(
+            apiKey: apiKey,
+            state: state,
+            recentTranscripts: recentTranscripts,
+            errorLog: errorLog
+        )
         coordinator = coord
         // Optimistically clear prior errors; AppCoordinator.start() will
         // overwrite to .startupFailed if hotkey tap install fails.
@@ -154,9 +180,12 @@ private struct MenuBarLabelView: View {
 private struct MenuContentView: View {
     let state: AppState
     let recentTranscripts: RecentTranscriptsStore
+    let errorLog: ErrorLogStore
     let onSetKey: () -> Void
     let onCopyTranscript: (TranscriptEntry) -> Void
     let onClearTranscripts: () -> Void
+    let onCopyErrorEntry: (ErrorLogEntry) -> Void
+    let onClearErrorLog: () -> Void
     let onDismissError: () -> Void
 
     var body: some View {
@@ -168,6 +197,12 @@ private struct MenuContentView: View {
             entries: recentTranscripts.entries,
             onCopy: onCopyTranscript,
             onClear: onClearTranscripts
+        )
+        Divider()
+        ErrorLogMenu(
+            entries: errorLog.entries,
+            onCopy: onCopyErrorEntry,
+            onClear: onClearErrorLog
         )
         if let error = state.lastError {
             Divider()

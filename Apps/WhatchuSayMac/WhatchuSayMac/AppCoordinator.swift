@@ -35,6 +35,7 @@ final class AppState {
 final class AppCoordinator {
     let state: AppState
     let recentTranscripts: RecentTranscriptsStore
+    let errorLog: ErrorLogStore
     private let orchestrator: Orchestrator
     private let hotkeySource: HotkeySourceMac
     private let audio: AVAudioCapture
@@ -43,9 +44,15 @@ final class AppCoordinator {
     private var eventTask: Task<Void, Never>?
     private var started = false
 
-    init(apiKey: String, state: AppState, recentTranscripts: RecentTranscriptsStore) {
+    init(
+        apiKey: String,
+        state: AppState,
+        recentTranscripts: RecentTranscriptsStore,
+        errorLog: ErrorLogStore
+    ) {
         self.state = state
         self.recentTranscripts = recentTranscripts
+        self.errorLog = errorLog
         let provider = ElevenLabsProvider(apiKey: apiKey)
         let injector = InjectorMac()
         let stateMachine = ActivationStateMachine()
@@ -76,19 +83,22 @@ final class AppCoordinator {
                 await orchestrator.handle(hotkeyEvent: event)
             }
         } catch {
-            state.status = .startupFailed(error.localizedDescription)
-            state.lastError = error.localizedDescription
+            let message = error.localizedDescription
+            state.status = .startupFailed(message)
+            state.lastError = message
+            errorLog.record(text: "Startup failed: \(message)")
             return
         }
 
         hud.attachAudio(rms: audio.rmsLevels)
         sleepWake.start()
 
-        eventTask = Task { [orchestrator, state, hud, recentTranscripts, hotkeySource] in
+        eventTask = Task { [orchestrator, state, hud, recentTranscripts, errorLog, hotkeySource] in
             for await event in orchestrator.events {
                 hud.handle(event: event)
                 Self.applyToAppState(event, state: state)
                 Self.applyToRecentTranscripts(event, store: recentTranscripts)
+                Self.applyToErrorLog(event, store: errorLog)
                 await Self.applyToHotkeyGate(event, source: hotkeySource)
             }
         }
@@ -120,6 +130,14 @@ final class AppCoordinator {
     /// be able to copy regardless of coordinator state (e.g., during
     /// `.needsSetup` when no coordinator exists).
     static func copyToPasteboard(_ entry: TranscriptEntry) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(entry.text, forType: .string)
+    }
+
+    /// Copy an error-log entry's text to the system clipboard. Same shape
+    /// as `copyToPasteboard(TranscriptEntry)` so menu wiring is symmetric.
+    static func copyToPasteboard(_ entry: ErrorLogEntry) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(entry.text, forType: .string)
@@ -175,6 +193,19 @@ final class AppCoordinator {
         store: RecentTranscriptsStore
     ) {
         if case .sessionEnded(let text?) = event {
+            store.record(text: text)
+        }
+    }
+
+    /// Record runtime errors to the error-log store. Only `.error` events
+    /// are persisted; other lifecycle events are no-ops. Startup-time
+    /// errors (hotkey tap install failure, keychain write failure) bypass
+    /// the orchestrator and call `errorLog.record(text:)` directly.
+    static func applyToErrorLog(
+        _ event: OrchestratorEvent,
+        store: ErrorLogStore
+    ) {
+        if case .error(let text) = event {
             store.record(text: text)
         }
     }
