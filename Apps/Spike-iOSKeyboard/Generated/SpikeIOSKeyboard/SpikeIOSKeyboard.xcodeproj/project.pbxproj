@@ -1,0 +1,754 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		378F761E2FA1698C009BEF9A /* SpikeKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 378F76172FA1698C009BEF9A /* SpikeKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		378F761C2FA1698C009BEF9A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 37BA04DC2FA166C600520B9B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 378F76162FA1698C009BEF9A;
+			remoteInfo = SpikeKeyboard;
+		};
+		37BA04F22FA166C800520B9B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 37BA04DC2FA166C600520B9B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 37BA04E32FA166C600520B9B;
+			remoteInfo = SpikeIOSKeyboard;
+		};
+		37BA04FC2FA166C800520B9B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 37BA04DC2FA166C600520B9B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 37BA04E32FA166C600520B9B;
+			remoteInfo = SpikeIOSKeyboard;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		378F761F2FA1698C009BEF9A /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				378F761E2FA1698C009BEF9A /* SpikeKeyboard.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		378F76172FA1698C009BEF9A /* SpikeKeyboard.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SpikeKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		37BA04E42FA166C600520B9B /* SpikeIOSKeyboard.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SpikeIOSKeyboard.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		37BA04F12FA166C800520B9B /* SpikeIOSKeyboardTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SpikeIOSKeyboardTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		37BA04FB2FA166C800520B9B /* SpikeIOSKeyboardUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SpikeIOSKeyboardUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		378F76222FA1698C009BEF9A /* Exceptions for "SpikeKeyboard" folder in "SpikeKeyboard" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 378F76162FA1698C009BEF9A /* SpikeKeyboard */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		378F76182FA1698C009BEF9A /* SpikeKeyboard */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				378F76222FA1698C009BEF9A /* Exceptions for "SpikeKeyboard" folder in "SpikeKeyboard" target */,
+			);
+			path = SpikeKeyboard;
+			sourceTree = "<group>";
+		};
+		37BA04E62FA166C600520B9B /* SpikeIOSKeyboard */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SpikeIOSKeyboard;
+			sourceTree = "<group>";
+		};
+		37BA04F42FA166C800520B9B /* SpikeIOSKeyboardTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SpikeIOSKeyboardTests;
+			sourceTree = "<group>";
+		};
+		37BA04FE2FA166C800520B9B /* SpikeIOSKeyboardUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SpikeIOSKeyboardUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		378F76142FA1698C009BEF9A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		37BA04E12FA166C600520B9B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		37BA04EE2FA166C800520B9B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		37BA04F82FA166C800520B9B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		37BA04DB2FA166C600520B9B = {
+			isa = PBXGroup;
+			children = (
+				37BA04E62FA166C600520B9B /* SpikeIOSKeyboard */,
+				37BA04F42FA166C800520B9B /* SpikeIOSKeyboardTests */,
+				37BA04FE2FA166C800520B9B /* SpikeIOSKeyboardUITests */,
+				378F76182FA1698C009BEF9A /* SpikeKeyboard */,
+				37BA04E52FA166C600520B9B /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		37BA04E52FA166C600520B9B /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				37BA04E42FA166C600520B9B /* SpikeIOSKeyboard.app */,
+				37BA04F12FA166C800520B9B /* SpikeIOSKeyboardTests.xctest */,
+				37BA04FB2FA166C800520B9B /* SpikeIOSKeyboardUITests.xctest */,
+				378F76172FA1698C009BEF9A /* SpikeKeyboard.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		378F76162FA1698C009BEF9A /* SpikeKeyboard */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 378F76232FA1698C009BEF9A /* Build configuration list for PBXNativeTarget "SpikeKeyboard" */;
+			buildPhases = (
+				378F76132FA1698C009BEF9A /* Sources */,
+				378F76142FA1698C009BEF9A /* Frameworks */,
+				378F76152FA1698C009BEF9A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				378F76182FA1698C009BEF9A /* SpikeKeyboard */,
+			);
+			name = SpikeKeyboard;
+			packageProductDependencies = (
+			);
+			productName = SpikeKeyboard;
+			productReference = 378F76172FA1698C009BEF9A /* SpikeKeyboard.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		37BA04E32FA166C600520B9B /* SpikeIOSKeyboard */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 37BA05052FA166C800520B9B /* Build configuration list for PBXNativeTarget "SpikeIOSKeyboard" */;
+			buildPhases = (
+				37BA04E02FA166C600520B9B /* Sources */,
+				37BA04E12FA166C600520B9B /* Frameworks */,
+				37BA04E22FA166C600520B9B /* Resources */,
+				378F761F2FA1698C009BEF9A /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				378F761D2FA1698C009BEF9A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				37BA04E62FA166C600520B9B /* SpikeIOSKeyboard */,
+			);
+			name = SpikeIOSKeyboard;
+			packageProductDependencies = (
+			);
+			productName = SpikeIOSKeyboard;
+			productReference = 37BA04E42FA166C600520B9B /* SpikeIOSKeyboard.app */;
+			productType = "com.apple.product-type.application";
+		};
+		37BA04F02FA166C800520B9B /* SpikeIOSKeyboardTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 37BA05082FA166C800520B9B /* Build configuration list for PBXNativeTarget "SpikeIOSKeyboardTests" */;
+			buildPhases = (
+				37BA04ED2FA166C800520B9B /* Sources */,
+				37BA04EE2FA166C800520B9B /* Frameworks */,
+				37BA04EF2FA166C800520B9B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				37BA04F32FA166C800520B9B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				37BA04F42FA166C800520B9B /* SpikeIOSKeyboardTests */,
+			);
+			name = SpikeIOSKeyboardTests;
+			packageProductDependencies = (
+			);
+			productName = SpikeIOSKeyboardTests;
+			productReference = 37BA04F12FA166C800520B9B /* SpikeIOSKeyboardTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		37BA04FA2FA166C800520B9B /* SpikeIOSKeyboardUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 37BA050B2FA166C800520B9B /* Build configuration list for PBXNativeTarget "SpikeIOSKeyboardUITests" */;
+			buildPhases = (
+				37BA04F72FA166C800520B9B /* Sources */,
+				37BA04F82FA166C800520B9B /* Frameworks */,
+				37BA04F92FA166C800520B9B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				37BA04FD2FA166C800520B9B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				37BA04FE2FA166C800520B9B /* SpikeIOSKeyboardUITests */,
+			);
+			name = SpikeIOSKeyboardUITests;
+			packageProductDependencies = (
+			);
+			productName = SpikeIOSKeyboardUITests;
+			productReference = 37BA04FB2FA166C800520B9B /* SpikeIOSKeyboardUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		37BA04DC2FA166C600520B9B /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2640;
+				LastUpgradeCheck = 2640;
+				TargetAttributes = {
+					378F76162FA1698C009BEF9A = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
+					37BA04E32FA166C600520B9B = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
+					37BA04F02FA166C800520B9B = {
+						CreatedOnToolsVersion = 26.4.1;
+						TestTargetID = 37BA04E32FA166C600520B9B;
+					};
+					37BA04FA2FA166C800520B9B = {
+						CreatedOnToolsVersion = 26.4.1;
+						TestTargetID = 37BA04E32FA166C600520B9B;
+					};
+				};
+			};
+			buildConfigurationList = 37BA04DF2FA166C600520B9B /* Build configuration list for PBXProject "SpikeIOSKeyboard" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 37BA04DB2FA166C600520B9B;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 37BA04E52FA166C600520B9B /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				37BA04E32FA166C600520B9B /* SpikeIOSKeyboard */,
+				37BA04F02FA166C800520B9B /* SpikeIOSKeyboardTests */,
+				37BA04FA2FA166C800520B9B /* SpikeIOSKeyboardUITests */,
+				378F76162FA1698C009BEF9A /* SpikeKeyboard */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		378F76152FA1698C009BEF9A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		37BA04E22FA166C600520B9B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		37BA04EF2FA166C800520B9B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		37BA04F92FA166C800520B9B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		378F76132FA1698C009BEF9A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		37BA04E02FA166C600520B9B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		37BA04ED2FA166C800520B9B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		37BA04F72FA166C800520B9B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		378F761D2FA1698C009BEF9A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 378F76162FA1698C009BEF9A /* SpikeKeyboard */;
+			targetProxy = 378F761C2FA1698C009BEF9A /* PBXContainerItemProxy */;
+		};
+		37BA04F32FA166C800520B9B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 37BA04E32FA166C600520B9B /* SpikeIOSKeyboard */;
+			targetProxy = 37BA04F22FA166C800520B9B /* PBXContainerItemProxy */;
+		};
+		37BA04FD2FA166C800520B9B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 37BA04E32FA166C600520B9B /* SpikeIOSKeyboard */;
+			targetProxy = 37BA04FC2FA166C800520B9B /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		378F76202FA1698C009BEF9A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = SpikeKeyboard/SpikeKeyboard.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4S4YH4HD6L;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SpikeKeyboard/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SpikeKeyboard;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = s900mhz.SpikeIOSKeyboard.SpikeKeyboard;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		378F76212FA1698C009BEF9A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = SpikeKeyboard/SpikeKeyboard.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4S4YH4HD6L;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SpikeKeyboard/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SpikeKeyboard;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = s900mhz.SpikeIOSKeyboard.SpikeKeyboard;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		37BA05032FA166C800520B9B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 4S4YH4HD6L;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		37BA05042FA166C800520B9B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 4S4YH4HD6L;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		37BA05062FA166C800520B9B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = SpikeIOSKeyboard/SpikeIOSKeyboard.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4S4YH4HD6L;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SpikeIOSKeyboard captures audio to transcribe your speech in real time.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = s900mhz.SpikeIOSKeyboard;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		37BA05072FA166C800520B9B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = SpikeIOSKeyboard/SpikeIOSKeyboard.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4S4YH4HD6L;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SpikeIOSKeyboard captures audio to transcribe your speech in real time.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = s900mhz.SpikeIOSKeyboard;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		37BA05092FA166C800520B9B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4S4YH4HD6L;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = s900mhz.SpikeIOSKeyboardTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SpikeIOSKeyboard.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SpikeIOSKeyboard";
+			};
+			name = Debug;
+		};
+		37BA050A2FA166C800520B9B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4S4YH4HD6L;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = s900mhz.SpikeIOSKeyboardTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SpikeIOSKeyboard.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SpikeIOSKeyboard";
+			};
+			name = Release;
+		};
+		37BA050C2FA166C800520B9B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4S4YH4HD6L;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = s900mhz.SpikeIOSKeyboardUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = SpikeIOSKeyboard;
+			};
+			name = Debug;
+		};
+		37BA050D2FA166C800520B9B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4S4YH4HD6L;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = s900mhz.SpikeIOSKeyboardUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = SpikeIOSKeyboard;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		378F76232FA1698C009BEF9A /* Build configuration list for PBXNativeTarget "SpikeKeyboard" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				378F76202FA1698C009BEF9A /* Debug */,
+				378F76212FA1698C009BEF9A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		37BA04DF2FA166C600520B9B /* Build configuration list for PBXProject "SpikeIOSKeyboard" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				37BA05032FA166C800520B9B /* Debug */,
+				37BA05042FA166C800520B9B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		37BA05052FA166C800520B9B /* Build configuration list for PBXNativeTarget "SpikeIOSKeyboard" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				37BA05062FA166C800520B9B /* Debug */,
+				37BA05072FA166C800520B9B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		37BA05082FA166C800520B9B /* Build configuration list for PBXNativeTarget "SpikeIOSKeyboardTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				37BA05092FA166C800520B9B /* Debug */,
+				37BA050A2FA166C800520B9B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		37BA050B2FA166C800520B9B /* Build configuration list for PBXNativeTarget "SpikeIOSKeyboardUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				37BA050C2FA166C800520B9B /* Debug */,
+				37BA050D2FA166C800520B9B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 37BA04DC2FA166C600520B9B /* Project object */;
+}
