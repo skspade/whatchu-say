@@ -42,6 +42,11 @@ public actor Orchestrator {
     private var sessionEventTask: Task<Void, Never>?
     private var timerToken: TimerToken?
 
+    /// Bumped on every `openSession` and `closeCurrentSession`. Lets the
+    /// session-events consumer detect "the events stream finished on its own"
+    /// (epoch unchanged → unexpected) vs "we closed it" (epoch bumped → no-op).
+    private var sessionEpoch: UInt64 = 0
+
     /// Captured final transcript text when it arrives ahead of the
     /// `awaitFinal()` caller. Cleared on consumption or session swap.
     private var pendingFinal: String?
@@ -127,7 +132,8 @@ public actor Orchestrator {
             let session = try await provider.open(config: SessionConfig())
             currentSession = session
             currentMode = mode
-            startSessionEventConsumer(session)
+            sessionEpoch &+= 1
+            startSessionEventConsumer(session, epoch: sessionEpoch)
             eventsContinuation.yield(.sessionStarted(mode: mode))
         } catch {
             // TODO(1.4): surface as a toast and reset the FSM. Logging until
@@ -145,11 +151,18 @@ public actor Orchestrator {
         // the tail of long transcripts arrives at the server after the
         // commit signal and is excluded from the committed transcript.
         await stopAndDrainAudio()
+        // After every suspension below, the session may have been torn down
+        // by `handleSessionStreamEnded` (server-side error etc.), which has
+        // already emitted `.sessionEnded(nil)` and reset the FSM. Bail out
+        // quietly to avoid a duplicate `.sessionEnded` and a doomed `awaitFinal`.
+        if currentSession == nil { return }
 
         try? await session.endOfStream()
+        if currentSession == nil { return }
         eventsContinuation.yield(.finalizing)
 
         let finalText = await awaitFinal()
+        if currentSession == nil { return }
 
         await closeCurrentSession()
 
@@ -203,6 +216,15 @@ public actor Orchestrator {
     /// didn't release the key, and the audio they spoke pre-sleep was lost
     /// when the OS suspended the WebSocket. Treating it like a cancel.
     public func handleSystemSleep() async {
+        await interruptAndReset()
+    }
+
+    /// Shared teardown for "something killed the active session out from under
+    /// us" — system sleep, server-side WebSocket close, etc. Closes the
+    /// session (which resumes any pending finalize waiters with `nil`), stops
+    /// audio, cancels the FSM timer, resets the FSM, and emits a single
+    /// `.sessionEnded(nil)` if a session was live.
+    private func interruptAndReset() async {
         await cancelDictation()
         if let token = timerToken {
             await timerScheduler.cancel(token)
@@ -222,6 +244,10 @@ public actor Orchestrator {
     /// session, drop captured-final state, and resume any waiters with `nil`
     /// so they don't dangle.
     private func closeCurrentSession() async {
+        // Bump the epoch BEFORE the consumer's events stream finishes so the
+        // post-loop `handleSessionStreamEnded` sees a stale epoch and skips
+        // the unexpected-teardown path.
+        sessionEpoch &+= 1
         sessionEventTask?.cancel()
         sessionEventTask = nil
         if let session = currentSession {
@@ -238,13 +264,27 @@ public actor Orchestrator {
 
     // MARK: - Session event consumer
 
-    private func startSessionEventConsumer(_ session: any SttSession) {
+    private func startSessionEventConsumer(_ session: any SttSession, epoch: UInt64) {
         sessionEventTask = Task { [weak self] in
             for await event in session.events {
                 if Task.isCancelled { return }
                 await self?.handleSessionEvent(event)
             }
+            // Stream finished. If the orchestrator still owns this session
+            // (epoch unchanged), the session died on its own — interrupt and
+            // reset so we don't deadlock a subsequent finalize.
+            await self?.handleSessionStreamEnded(epoch: epoch)
         }
+    }
+
+    /// Called when a session's events stream finishes. If the epoch we
+    /// captured at consumer-start time still matches `sessionEpoch`, this is
+    /// an unexpected teardown (server error, network drop, etc.) and we run
+    /// the same recovery flow as `handleSystemSleep`. Otherwise we already
+    /// initiated the close and there's nothing to do.
+    private func handleSessionStreamEnded(epoch: UInt64) async {
+        guard epoch == sessionEpoch else { return }
+        await interruptAndReset()
     }
 
     private func handleSessionEvent(_ event: SttEvent) {

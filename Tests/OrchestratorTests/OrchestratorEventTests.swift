@@ -184,6 +184,65 @@ struct OrchestratorEventTests {
         await collector.cancel()
     }
 
+    @Test("session events stream ends mid-press-hold: emits sessionEnded(nil), resets FSM")
+    func sessionStreamEndsDuringPressHold() async {
+        let rig = makeScriptableRig()
+        let collector = EventCollector()
+        await collector.start(stream: rig.orchestrator.events)
+
+        await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
+        await rig.timer.fireAll()
+        #expect(await rig.orchestrator.isCapturing())
+
+        // Server-side error path: warning surfaced, then events stream
+        // finishes (mirrors ElevenLabsSession's tearDown after .error).
+        await rig.provider.yieldWarning("service_busy")
+        await rig.provider.lastSession?.close()
+        for _ in 0..<8 { await Task.yield() }
+
+        let events = await collector.snapshot()
+        #expect(events.contains(.error(text: "service_busy")))
+        #expect(events.contains(.sessionEnded(injectedText: nil)))
+        #expect(!events.contains(.finalizing))
+        #expect(await !rig.orchestrator.isCapturing())
+        #expect(await rig.injector.received.isEmpty)
+
+        // FSM is reset: a fresh keyDown opens a new session cleanly.
+        await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
+        await rig.timer.fireAll()
+        #expect(await rig.orchestrator.isCapturing())
+
+        await collector.cancel()
+    }
+
+    @Test("session dies, then user releases key: keyUp is a no-op (no deadlock, single ended)")
+    func sessionStreamEndsThenKeyUp() async {
+        let rig = makeScriptableRig()
+        let collector = EventCollector()
+        await collector.start(stream: rig.orchestrator.events)
+
+        await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
+        await rig.timer.fireAll()
+
+        // Mid-press-hold the session dies. Without the fix, the trailing
+        // keyUp deadlocks in awaitFinal forever.
+        await rig.provider.lastSession?.close()
+        for _ in 0..<8 { await Task.yield() }
+
+        await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
+
+        let events = await collector.snapshot()
+        let endedCount = events.filter {
+            if case .sessionEnded = $0 { return true }
+            return false
+        }.count
+        #expect(endedCount == 1)
+        #expect(await !rig.orchestrator.isCapturing())
+        #expect(await rig.injector.received.isEmpty)
+
+        await collector.cancel()
+    }
+
     @Test("hands-free promotion: speculative session ends, hands-free starts")
     func handsFreePromotionEvents() async {
         let rig = makeScriptableRig()
