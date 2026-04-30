@@ -63,6 +63,8 @@ final class HUDController {
             state.status = .error(text: text)
             showPanel()
             scheduleDismiss(after: Self.errorDismissDelay)
+        case .permissionDenied:
+            break
         }
     }
 

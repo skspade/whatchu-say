@@ -233,6 +233,27 @@ public actor Orchestrator {
         await interruptAndReset()
     }
 
+    /// Handle a runtime audio-engine configuration change — typically the
+    /// default input device switched (headphones plugged/unplugged, BT
+    /// headset went away, AirPods kept-but-Bluetooth-dropped). The active
+    /// session's audio stream is now bound to a stale device, so the
+    /// safest path is to abort the session, surface a clear error, and
+    /// let the user re-press the hotkey against the new device.
+    ///
+    /// Emits a `.error` event BEFORE tearing down so consumers see the
+    /// "audio device changed" message land on `lastError` and the
+    /// menubar icon flips yellow. The trailing `.sessionEnded(nil)` from
+    /// `interruptAndReset` doesn't clear `lastError` (cancel/empty isn't
+    /// recovery), so the error sticks until the next successful inject.
+    /// No-op if no session is live.
+    public func handleAudioInterruption() async {
+        guard currentSession != nil else { return }
+        eventsContinuation.yield(
+            .error(text: "Audio device changed — please retry your dictation.")
+        )
+        await interruptAndReset()
+    }
+
     /// Shared teardown for "something killed the active session out from under
     /// us" — system sleep, server-side WebSocket close, etc. Closes the
     /// session (which resumes any pending finalize waiters with `nil`), stops

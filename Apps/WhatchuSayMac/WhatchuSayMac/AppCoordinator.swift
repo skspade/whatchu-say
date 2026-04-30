@@ -46,6 +46,7 @@ final class AppCoordinator {
     private let audio: AVAudioCapture
     private let hud: HUDController
     private let sleepWake: SleepWakeObserver
+    private let audioConfig: AudioConfigurationObserver
     private var eventTask: Task<Void, Never>?
     private var started = false
 
@@ -77,6 +78,9 @@ final class AppCoordinator {
         self.sleepWake = SleepWakeObserver { [orchestrator] in
             await orchestrator.handleSystemSleep()
         }
+        self.audioConfig = AudioConfigurationObserver { [orchestrator] in
+            await orchestrator.handleAudioInterruption()
+        }
     }
 
     func start() async {
@@ -104,6 +108,7 @@ final class AppCoordinator {
 
         hud.attachAudio(rms: audio.rmsLevels)
         sleepWake.start()
+        audioConfig.start()
 
         eventTask = Task { [orchestrator, state, hud, recentTranscripts, errorLog, hotkeySource] in
             for await event in orchestrator.events {
@@ -129,7 +134,7 @@ final class AppCoordinator {
             await source.setDictating(true)
         case .sessionEnded:
             await source.setDictating(false)
-        case .partial, .finalizing, .error:
+        case .partial, .finalizing, .error, .permissionDenied:
             break
         }
     }
@@ -160,6 +165,7 @@ final class AppCoordinator {
         eventTask = nil
         hud.detach()
         sleepWake.stop()
+        audioConfig.stop()
         await hotkeySource.stop()
         started = false
     }
