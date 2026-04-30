@@ -3,9 +3,11 @@
 | Field | Value |
 | --- | --- |
 | Version | v2 |
-| Status | Pre-implementation, design phase |
+| Status | Phase 1 in implementation — Mac engine done, shell incomplete (~50% overall) |
 | Last updated | 2026-04-29 |
 | Companion docs | [PRD.md](./PRD.md), [TECH_SPEC.md](./TECH_SPEC.md) |
+
+> **Status legend** (used in milestone bullets below): ✅ done · ⚠️ partial / shim · ❌ not done · ⏳ pending validation
 
 ---
 
@@ -29,13 +31,15 @@ Effort estimates assume one developer working consistently, not full-time. Phase
 
 **Outcome**: Swift Package compiles, all logical components exist with stubs, mock end-to-end test passes.
 
-- Swift Package skeleton with all targets per `TECH_SPEC.md` §3.
-- `Sources/Hotkey/ActivationStateMachine.swift` implemented + exhaustive unit tests, including cancellation paths.
-- `Sources/STTCore/` protocols defined (with `EndpointMode`); `STTMockProvider` implemented.
-- `Sources/Audio/` interfaces + ring buffer + chunker + `RMSAnalyzer`, with stub `AVAudioCapture`.
-- `Sources/Orchestrator/` with fakes — passes basic end-to-end test.
-- `Sources/Core/AppConfig.swift` with `schemaVersion = 1` and migration handler stubs.
-- CI: GitHub Actions with `swift test` on macOS + Linux smoke compile.
+**Status (2026-04-29)**: ~85% — code-side done; CI not set up; `AppConfig` migration scaffolding still a stub.
+
+- ✅ Swift Package skeleton with all targets per `TECH_SPEC.md` §3.
+- ✅ `Sources/Hotkey/ActivationStateMachine.swift` implemented + exhaustive unit tests, including cancellation paths.
+- ✅ `Sources/STTCore/` protocols defined (with `EndpointMode`); `STTMockProvider` implemented.
+- ✅ `Sources/Audio/` interfaces + ring buffer + chunker + `RMSAnalyzer`, with stub `AVAudioCapture`.
+- ✅ `Sources/Orchestrator/` with fakes — passes basic end-to-end test.
+- ⚠️ `Sources/Core/AppConfig.swift` with `schemaVersion = 1` and migration handler stubs. *(`schemaVersion` exists; no `ConfigMigration` type or migration stubs yet.)*
+- ❌ CI: GitHub Actions with `swift test` on macOS + Linux smoke compile. *(No `.github/` directory.)*
 
 **Exit criteria**: `swift test` passes locally and in CI. `OrchestratorTests` runs a fake utterance through the full chain, including cancellation.
 
@@ -43,12 +47,14 @@ Effort estimates assume one developer working consistently, not full-time. Phase
 
 **Outcome**: real press-and-hold dictation works against ElevenLabs, in any app, with **paste-default** injection.
 
-- `AVAudioCapture` real implementation.
-- `HotkeySourceMac` using `CGEventTap` (with key-repeat filter and modifier-key disambiguation).
-- `STTElevenLabs` real adapter with `endpointDetection: .clientControlled` set on session config. Verify provider supports it; if not, document fallback path.
-- `InjectorMac` with paste-default strategy + type for short text.
-- Minimal `WhatchuSayMac` Xcode project with `MenuBarExtra`, hardcoded hotkey, hardcoded API key (env var for now).
-- First real dictation: hold key, talk, release, see text appear. Pauses while holding don't trigger anything.
+**Status (2026-04-29)**: ✅ complete. Bonus: API-key handling moved to Keychain (was originally scoped as env-var-only).
+
+- ✅ `AVAudioCapture` real implementation.
+- ✅ `HotkeySourceMac` using `CGEventTap` (with key-repeat filter and modifier-key disambiguation).
+- ✅ `STTElevenLabs` real adapter with `endpointDetection: .clientControlled` set on session config. Verify provider supports it; if not, document fallback path.
+- ✅ `InjectorMac` with paste-default strategy + type for short text.
+- ✅ Minimal `WhatchuSayMac` Xcode project with `MenuBarExtra`, hardcoded hotkey, hardcoded API key (env var for now). *(Key now in Keychain via `KeychainAPIKeyStore` + menu-driven `APIKeyPrompt`.)*
+- ✅ First real dictation: hold key, talk, release, see text appear. Pauses while holding don't trigger anything.
 
 **Exit criteria**: I can dictate a paragraph into TextEdit. Pausing mid-sentence to think doesn't cause premature finalization. No crashes across 20 attempts.
 
@@ -56,14 +62,16 @@ Effort estimates assume one developer working consistently, not full-time. Phase
 
 **Outcome**: app handles permissions cleanly, has a usable settings UI, has the floating overlay, and supports cancellation.
 
-- First-run onboarding flow with permission status panes.
-- Privacy disclosure pane on first run.
-- Settings window: provider config, hotkey rebinding, cancel-key rebinding, injection preferences, overlay anchor preference.
-- API key entry and Keychain persistence.
-- **Floating overlay UI** (`Sources/PlatformApple/Mac/Overlay/`): NSPanel + VU meter view + lifecycle integration.
-- **Cancellation flow**: second `CGEventTap` filter for cancel key; consume only during dictation states; orchestrator handles `.cancelDictation`.
-- Per-app injection override UI.
-- Permission-fix-it deep links to System Settings.
+**Status (2026-04-29)**: ~30% — overlay (HUD), Esc-cancel, and Keychain API-key are in. No Settings window, no onboarding, no privacy pane, no per-app override UI, no permission-fix-it links. This is the largest gap in Phase 1.
+
+- ❌ First-run onboarding flow with permission status panes.
+- ❌ Privacy disclosure pane on first run.
+- ❌ Settings window: provider config, hotkey rebinding, cancel-key rebinding, injection preferences, overlay anchor preference.
+- ✅ API key entry and Keychain persistence.
+- ✅ **Floating overlay UI** (`Sources/PlatformApple/Mac/Overlay/`): NSPanel + VU meter view + lifecycle integration. *(Implemented under `Apps/WhatchuSayMac/WhatchuSayMac/HUD/` rather than the originally planned path.)*
+- ✅ **Cancellation flow**: second `CGEventTap` filter for cancel key; consume only during dictation states; orchestrator handles `.cancelDictation`. *(Gate driven by `setDictating(_:)` from orchestrator session events.)*
+- ⚠️ Per-app injection override UI. *(`StrategySelector.perAppOverrides` infrastructure exists; no UI to edit it.)*
+- ❌ Permission-fix-it deep links to System Settings. *(`HotkeySourceError.accessibilityDenied` is thrown but not surfaced with an "Open System Settings" action.)*
 
 **Exit criteria**: a fresh user account can install, walk through onboarding (including privacy disclosure), and dictate within 5 minutes. Cancellation works in both press-hold and (stub) hands-free.
 
@@ -71,13 +79,15 @@ Effort estimates assume one developer working consistently, not full-time. Phase
 
 **Outcome**: double-tap-toggle works; provider failures surface cleanly; sleep/wake handled.
 
-- Double-tap toggle activation mode with full state machine integration.
-- **Hands-free per-utterance boundary signal**: implement candidate (a) — quick double-tap inside hands-free flushes current utterance and continues. Validate via dogfood; switch to (b) or (c) if (a) feels wrong.
-- **Reconnect policy**: fail-fast — no audio replay, mid-utterance drops surface as toast, user retries manually.
-- Error toasts and degraded-state UI (yellow tray icon, fix-it links).
-- Audio device disconnect recovery.
-- **Sleep/wake observer**: graceful close on sleep; transparent reconnect on next activation.
-- Empty result handling (silent — no notification, no inject).
+**Status (2026-04-29)**: ~55% — FSM hands-free, sleep/wake, empty-result handling, yellow icon + error log all in. Hands-free per-utterance flush, audio-device disconnect recovery, and permission fix-it links still missing; reconnect path lacks a dedicated "lost" toast.
+
+- ✅ Double-tap toggle activation mode with full state machine integration.
+- ❌ **Hands-free per-utterance boundary signal**: implement candidate (a) — quick double-tap inside hands-free flushes current utterance and continues. Validate via dogfood; switch to (b) or (c) if (a) feels wrong. *(FSM treats single keyDown in `handsFree` as exit, not flush-and-continue. Candidate (a) not yet attempted.)*
+- ⚠️ **Reconnect policy**: fail-fast — no audio replay, mid-utterance drops surface as toast, user retries manually. *(No replay — good. Drops surface as generic `.error` event into menubar/error log; no dedicated "lost" toast UX.)*
+- ⚠️ Error toasts and degraded-state UI (yellow tray icon, fix-it links). *(Yellow icon ✅, persistent recent-errors menu ✅, manual dismiss ✅, lifecycle clear on successful inject ✅. No fix-it deep links.)*
+- ❌ Audio device disconnect recovery. *(`AVAudioCapture` does not subscribe to `AVAudioEngineConfigurationChangeNotification` or route-change notifications.)*
+- ✅ **Sleep/wake observer**: graceful close on sleep; transparent reconnect on next activation. *(Wake intentionally not observed — next session opens fresh.)*
+- ✅ Empty result handling (silent — no notification, no inject).
 
 **Exit criteria**: kill Wi-Fi mid-utterance — gets a clear "lost" toast, no crash, no garbled output. Mac sleeps for 30+ minutes — first dictation post-wake works without manual intervention. Hands-free tested across a 30-minute writing session.
 
@@ -85,14 +95,16 @@ Effort estimates assume one developer working consistently, not full-time. Phase
 
 **Outcome**: shippable v1 — code-signed, notarized, distributable, with history, usage tracking, autostart. iOS architecture validated.
 
-- Transcription history view (chronological list, copy-to-clipboard).
-- **Usage tracking implementation**: `Sources/Usage/`, settings pane, menubar indicator (configurable).
-- `SMAppService` autostart integration.
-- Notarization script and packaging.
-- README + landing page (or GitHub release page) with screenshots.
-- **Second-provider mock validation**: implement `STTMockProvider` end-to-end with Orchestrator to confirm provider abstraction holds. Bonus: skeletal `STTDeepgram` adapter.
-- **iOS feasibility spike** — ✅ completed 2026-04-28. Result: in-extension recording is OS-blocked; Phase 2 uses host-app-recording flow. See [TECH_SPEC §8.3](./TECH_SPEC.md#83-phase-15-feasibility-spike-outcome--host-app-recording-is-primary).
-- Personal dogfood: 2 weeks of replacing Wispr Flow exclusively.
+**Status (2026-04-29)**: ~25% — recent-transcripts menu and iOS spike are done; provider abstraction proven via `STTMockProvider` in `OrchestratorTests`. Usage persistence/UI, autostart, notarization, and README still missing. Personal dogfood pending.
+
+- ✅ Transcription history view (chronological list, copy-to-clipboard). *(Implemented as menubar submenu via `RecentTranscriptsMenu`, not a dedicated window — within the spirit of the requirement.)*
+- ❌ **Usage tracking implementation**: `Sources/Usage/`, settings pane, menubar indicator (configurable). *(`UsageTracker` is in-memory stub; no persistence, no settings pane, no indicator.)*
+- ❌ `SMAppService` autostart integration.
+- ⚠️ Notarization script and packaging. *(`Apps/WhatchuSayMac/scripts/install-local.sh` + `Makefile` ditto a Debug build to `/Applications`; no notarization workflow.)*
+- ❌ README + landing page (or GitHub release page) with screenshots. *(No `README*` at repo root.)*
+- ⚠️ **Second-provider mock validation**: implement `STTMockProvider` end-to-end with Orchestrator to confirm provider abstraction holds. Bonus: skeletal `STTDeepgram` adapter. *(`STTMockProvider` is wired through `OrchestratorTests` so abstraction is proven; no `STTDeepgram` skeleton yet.)*
+- ✅ **iOS feasibility spike** — completed 2026-04-28. Result: in-extension recording is OS-blocked; Phase 2 uses host-app-recording flow. See [TECH_SPEC §8.3](./TECH_SPEC.md#83-phase-15-feasibility-spike-outcome--host-app-recording-is-primary).
+- ⏳ Personal dogfood: 2 weeks of replacing Wispr Flow exclusively. *(Not yet started as a tracked exercise.)*
 
 **Exit criteria**: PRD §10 success criteria met. Memory under 200 MB across 8-hour workday. 100 dictations with zero data loss (cancellations and connection-lost-with-clear-error counted as not-data-loss). Feasibility spike answered (✅ completed; see above).
 
