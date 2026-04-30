@@ -271,4 +271,40 @@ struct OrchestratorEventTests {
 
         await collector.cancel()
     }
+
+    @Test("mic permission denied at startDictation emits permissionDenied; no session opens")
+    func micPermissionDeniedEmitsEvent() async {
+        let provider = ScriptableProvider()
+        let injector = FakeInjector()
+        let audio = PermissionDeniedAudioCapture()
+        let timer = ManualTimerScheduler()
+        let fsm = ActivationStateMachine()
+        let usage = UsageTracker()
+        let orchestrator = Orchestrator(
+            provider: provider,
+            injector: injector,
+            stateMachine: fsm,
+            usage: usage,
+            audioCapture: audio,
+            timerScheduler: timer
+        )
+        let collector = EventCollector()
+        await collector.start(stream: orchestrator.events)
+
+        await orchestrator.handle(hotkeyEvent: .keyDown(at: now))
+
+        let events = await collector.snapshot()
+        #expect(events.contains(.permissionDenied(kind: .microphone)))
+        // No session was opened — the orchestrator bailed before
+        // touching the provider.
+        #expect(!events.contains { event in
+            if case .sessionStarted = event { return true }
+            return false
+        })
+        #expect(await !orchestrator.isCapturing())
+        #expect(await provider.sessions.isEmpty)
+        #expect(await injector.received.isEmpty)
+
+        await collector.cancel()
+    }
 }

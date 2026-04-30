@@ -119,7 +119,21 @@ public actor Orchestrator {
     // MARK: - Session lifecycle
 
     private func startDictation(mode: ActivationMode) async {
-        try? await audioCapture.start()
+        do {
+            try await audioCapture.start()
+        } catch AudioCaptureError.permissionDenied {
+            // Mic permission denied at the OS level. Abort before opening
+            // the provider — no audio means a useless session and a
+            // wasted WebSocket. The UI surfaces a fix-it deep-link from
+            // the event.
+            eventsContinuation.yield(.permissionDenied(kind: .microphone))
+            return
+        } catch {
+            eventsContinuation.yield(
+                .error(text: "Audio start failed: \(error.localizedDescription)")
+            )
+            return
+        }
         if audioForwarderTask == nil {
             startAudioForwarder()
         }

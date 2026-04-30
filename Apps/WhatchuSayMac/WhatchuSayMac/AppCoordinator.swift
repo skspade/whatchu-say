@@ -21,6 +21,11 @@ final class AppState {
     }
     var status: Status = .idle
     var lastError: String?
+    /// Set when whatchu-say can't proceed because the OS denied a
+    /// permission. The menu surfaces a "Fix in System Settings…" button
+    /// pointing at the relevant Privacy pane. Cleared on the next
+    /// successful inject (proves recovery) or via manual dismiss.
+    var permissionIssue: PermissionDeepLink?
 }
 
 /// Owns every long-lived component and the hotkey wiring. Built once at app
@@ -82,6 +87,13 @@ final class AppCoordinator {
             try await hotkeySource.start { [orchestrator] event in
                 await orchestrator.handle(hotkeyEvent: event)
             }
+        } catch HotkeySourceError.accessibilityDenied {
+            let permission = PermissionDeepLink.accessibility
+            state.status = .startupFailed(permission.errorMessage)
+            state.lastError = permission.errorMessage
+            state.permissionIssue = permission
+            errorLog.record(text: "Startup failed: \(permission.errorMessage)")
+            return
         } catch {
             let message = error.localizedDescription
             state.status = .startupFailed(message)
@@ -175,11 +187,22 @@ final class AppCoordinator {
             state.status = .idle
             if text != nil {
                 state.lastError = nil
+                state.permissionIssue = nil
             }
         case .error(let text):
             state.lastError = text
+        case .permissionDenied(let kind):
+            let permission = Self.deepLink(for: kind)
+            state.permissionIssue = permission
+            state.lastError = permission.errorMessage
         case .partial, .finalizing:
             break
+        }
+    }
+
+    private static func deepLink(for kind: PermissionKind) -> PermissionDeepLink {
+        switch kind {
+        case .microphone: return .microphone
         }
     }
 

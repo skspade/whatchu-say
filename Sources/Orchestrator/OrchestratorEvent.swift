@@ -28,4 +28,18 @@ public enum OrchestratorEvent: Sendable, Equatable {
     /// be alive — UIs should treat this as informational unless followed by
     /// a `.sessionEnded`.
     case error(text: String)
+
+    /// A required platform permission was denied at the OS level. Emitted
+    /// when audio capture refuses to start because the user said no to the
+    /// mic prompt (or the host is missing the entitlement). UI consumers
+    /// should surface a one-click fix-it affordance pointing at the
+    /// platform's settings UI.
+    case permissionDenied(kind: PermissionKind)
+}
+
+/// Cross-platform identifier for runtime-detectable permission denials.
+/// Currently only `microphone` — `accessibility` is a Mac-specific
+/// hotkey-tap concern detected at startup outside the orchestrator.
+public enum PermissionKind: Sendable, Equatable {
+    case microphone
 }

@@ -17,7 +17,8 @@ struct WhatchuSayMacApp: App {
                 onClearTranscripts: appDelegate.runClearRecentTranscripts,
                 onCopyErrorEntry: AppCoordinator.copyToPasteboard,
                 onClearErrorLog: appDelegate.runClearErrorLog,
-                onDismissError: appDelegate.dismissLastError
+                onDismissError: appDelegate.dismissLastError,
+                onOpenPermission: PermissionLauncher.open
             )
         } label: {
             MenuBarLabelView(state: appDelegate.state)
@@ -51,9 +52,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Manually clear the persistent error indicator (yellow menubar icon
     /// + "Error: …" line). Routed from the menu when the user knows about
     /// the error and wants the icon clean without proving recovery via a
-    /// successful dictation.
+    /// successful dictation. Also clears any paired permission issue so
+    /// the fix-it deep-link button disappears alongside the error.
     func dismissLastError() {
         state.lastError = nil
+        state.permissionIssue = nil
     }
 
     /// Resolve an API key from Keychain (preferred) or the env var
@@ -187,6 +190,7 @@ private struct MenuContentView: View {
     let onCopyErrorEntry: (ErrorLogEntry) -> Void
     let onClearErrorLog: () -> Void
     let onDismissError: () -> Void
+    let onOpenPermission: (PermissionDeepLink) -> Void
 
     var body: some View {
         Text(statusLabel(for: state))
@@ -207,6 +211,9 @@ private struct MenuContentView: View {
         if let error = state.lastError {
             Divider()
             Text("Error: \(error)").font(.caption).foregroundStyle(.red)
+            if let permission = state.permissionIssue {
+                Button(permission.buttonLabel) { onOpenPermission(permission) }
+            }
             Button("Dismiss Error") { onDismissError() }
         }
         Divider()

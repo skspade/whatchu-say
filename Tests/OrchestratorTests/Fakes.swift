@@ -55,6 +55,35 @@ actor FakeAudioCapture: AudioCapturing {
     }
 }
 
+// MARK: - PermissionDeniedAudioCapture
+
+/// `AudioCapturing` that always throws `AudioCaptureError.permissionDenied`
+/// from `start()`. Lets tests exercise the orchestrator's permission-denial
+/// path without standing up real `AVAudioCapture`.
+actor PermissionDeniedAudioCapture: AudioCapturing {
+    nonisolated let frames: AsyncStream<AudioFrame>
+    nonisolated let rmsLevels: AsyncStream<Float>
+    private nonisolated let framesContinuation: AsyncStream<AudioFrame>.Continuation
+    private nonisolated let rmsContinuation: AsyncStream<Float>.Continuation
+    private(set) var startCount: Int = 0
+
+    init() {
+        let (fStream, fCont) = AsyncStream<AudioFrame>.makeStream()
+        let (rStream, rCont) = AsyncStream<Float>.makeStream()
+        self.frames = fStream
+        self.rmsLevels = rStream
+        self.framesContinuation = fCont
+        self.rmsContinuation = rCont
+    }
+
+    func start() async throws {
+        startCount += 1
+        throw AudioCaptureError.permissionDenied
+    }
+
+    func stop() async {}
+}
+
 // MARK: - ManualTimerScheduler
 
 /// Manual scheduler for deterministic tests. Stores actions until `fireAll()`
