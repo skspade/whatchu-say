@@ -10,6 +10,7 @@ public enum LogSubsystem: String, Sendable {
     case usage
     case overlay
     case ui
+    case config
 }
 
 public enum AppLogger {

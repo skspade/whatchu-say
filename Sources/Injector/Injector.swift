@@ -9,9 +9,3 @@ public enum InjectionHint: Sendable, Equatable {
     case forceType
     case forcePaste
 }
-
-public enum InjectionStrategy: String, Codable, Sendable, Equatable {
-    case auto
-    case type
-    case paste
-}

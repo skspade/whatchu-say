@@ -2,6 +2,7 @@
 import Foundation
 import AppKit
 @preconcurrency import CoreGraphics
+import Core
 import Injector
 
 public enum InjectorMacError: Error, Sendable, Equatable {

@@ -90,6 +90,16 @@ let package = Package(
             path: "Sources/PlatformApple"
         ),
         .testTarget(
+            name: "CoreTests",
+            dependencies: ["Core"],
+            path: "Tests/CoreTests"
+        ),
+        .testTarget(
+            name: "InjectorTests",
+            dependencies: ["Injector", "Core"],
+            path: "Tests/InjectorTests"
+        ),
+        .testTarget(
             name: "HotkeyTests",
             dependencies: ["Hotkey"],
             path: "Tests/HotkeyTests"
