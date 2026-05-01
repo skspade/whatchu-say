@@ -1,17 +1,24 @@
 import SwiftUI
 import AppKit
+import Core
 import PlatformApple
 
 @main
 struct WhatchuSayMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
-    /// SwiftUI's `App` requires a `Scene`; with `LSUIElement = YES` and an
-    /// AppKit-owned `NSStatusItem`, we have nothing to put in a window. An
-    /// empty `Settings` scene satisfies the type system without ever being
-    /// presented (no Settings menu in agent apps).
+    /// SwiftUI's `App` requires a `Scene`. With `LSUIElement = YES` there's
+    /// no Settings menu item in an app menu (agent apps don't show one), so
+    /// the Settings scene is opened from the menubar dropdown via
+    /// `NSApp.sendAction(Selector(("showSettingsWindow:")), …)` —
+    /// see `AppDelegate.runOpenSettings`.
     var body: some Scene {
-        Settings { EmptyView() }
+        Settings {
+            SettingsView(
+                store: appDelegate.configStore,
+                apiKeys: appDelegate.apiKeys
+            )
+        }
     }
 }
 
@@ -20,6 +27,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let state = AppState()
     let recentTranscripts = RecentTranscriptsStore()
     let errorLog = ErrorLogStore()
+    let configStore = ConfigStore()
+    lazy var apiKeys: APIKeyController = APIKeyController(
+        keychain: keychain,
+        providerName: provider,
+        onKeySaved: { [weak self] newKey in
+            await self?.bringUpCoordinator(apiKey: newKey)
+        }
+    )
     private let keychain = KeychainAPIKeyStore()
     private let provider = "elevenlabs"
     private var coordinator: AppCoordinator?
@@ -29,14 +44,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("[WhatchuSay] applicationDidFinishLaunching")
         installStatusItem()
+        guard runFirstRunDisclosureIfNeeded() else { return }
         Task { @MainActor in
             await self.bootstrap()
+        }
+    }
+
+    /// Present the privacy disclosure modally when the user has not yet
+    /// acknowledged it. Blocks bootstrap until the user picks an outcome.
+    /// Returns `true` if launch should proceed; `false` if the app is
+    /// terminating (after a flush) and the caller should bail out.
+    private func runFirstRunDisclosureIfNeeded() -> Bool {
+        guard !configStore.config.privacy.hasReadDisclosure else { return true }
+
+        let providerInfo = ProviderRegistry.info(for: configStore.config.provider.providerName)
+        let outcome = FirstRunDisclosure.presentBlocking(providerInfo: providerInfo)
+
+        switch outcome {
+        case .acknowledged:
+            configStore.update {
+                $0.privacy.hasReadDisclosure = true
+                $0.privacy.disclosureAcknowledgedAt = Date()
+            }
+            // Persist immediately so a crash before the next debounce tick
+            // doesn't lose the acknowledgment and re-prompt on next launch.
+            configStore.flush()
+            return true
+        case .quit:
+            configStore.flush()
+            NSApp.terminate(nil)
+            return false
         }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         recentTranscripts.flushPendingWrites()
         errorLog.flushPendingWrites()
+        configStore.flush()
         statusItemController?.uninstall()
     }
 
@@ -48,6 +92,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func dismissLastError() {
         state.lastError = nil
         state.permissionIssue = nil
+    }
+
+    /// Open the SwiftUI Settings window. Agent apps (`LSUIElement = YES`)
+    /// stay in `.accessory` activation policy so the window can become key
+    /// without putting an icon in the Dock or app switcher. We bring the
+    /// app forward via `NSApp.activate(...)` so the window receives focus
+    /// and keyboard input; idempotent if the window is already open.
+    func runOpenSettings() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
 
     /// Build and install the menu-bar status item synchronously so the
@@ -67,7 +121,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 onCopyErrorEntry: AppCoordinator.copyToPasteboard,
                 onClearErrorLog: { [weak self] in self?.runClearErrorLog() },
                 onDismissError: { [weak self] in self?.dismissLastError() },
-                onOpenPermission: PermissionLauncher.open
+                onOpenPermission: PermissionLauncher.open,
+                onOpenSettings: { [weak self] in self?.runOpenSettings() }
             )
         )
         controller.install()
@@ -83,6 +138,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         await recentTranscripts.load()
         await errorLog.load()
+        // Hydrate APIKeyController so the Provider pane shows the saved-key
+        // suffix the first time the Settings window opens (otherwise it
+        // would render "(none)" until the user types).
+        await apiKeys.loadInitial()
 
         let stored = await readStoredKey()
         let envKey = ProcessInfo.processInfo.environment["ELEVENLABS_API_KEY"]?.nonEmpty
@@ -121,8 +180,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         errorLog.clear()
     }
 
-    /// Show the API-key prompt and, on save, write to Keychain and restart
-    /// the coordinator. Routed from the menu item.
+    /// Show the API-key prompt and, on save, persist via `apiKeys.save(...)`
+    /// — which writes to Keychain and triggers the coordinator restart via
+    /// the `onKeySaved` callback. Routed from the menu item; the Provider
+    /// pane drives the same `apiKeys.save(...)` call.
     func runSetKeyFlow() {
         let suffix = currentKey.flatMap(APIKeyPrompt.suffix(of:))
         let config = currentKey == nil
@@ -132,14 +193,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { @MainActor in
             do {
-                try await keychain.write(provider: provider, key: newKey)
+                try await apiKeys.save(newKey)
             } catch {
                 let message = String(describing: error)
                 errorLog.record(text: "Keychain write failed: \(message)")
                 presentError("Could not save API key", message: message)
-                return
             }
-            await bringUpCoordinator(apiKey: newKey)
         }
     }
 
@@ -154,6 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let coord = AppCoordinator(
             apiKey: apiKey,
             state: state,
+            configStore: configStore,
             recentTranscripts: recentTranscripts,
             errorLog: errorLog
         )

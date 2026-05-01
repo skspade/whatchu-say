@@ -28,6 +28,7 @@ final class StatusItemController: NSObject {
         let onClearErrorLog: () -> Void
         let onDismissError: () -> Void
         let onOpenPermission: (PermissionDeepLink) -> Void
+        let onOpenSettings: () -> Void
     }
 
     private let state: AppState
@@ -148,6 +149,7 @@ final class StatusItemController: NSObject {
         }
 
         items.append(.separator())
+        items.append(makeSettingsItem())
         items.append(makeQuitItem())
         return items
     }
@@ -314,6 +316,20 @@ final class StatusItemController: NSObject {
         return item
     }
 
+    private func makeSettingsItem() -> NSMenuItem {
+        // `keyEquivalent: ","` displays ⌘, in the menu (Mac convention for
+        // Settings/Preferences). The shortcut fires only while this menu is
+        // open — agent apps (`LSUIElement = YES`) have no app menu, so
+        // ⌘, isn't bound globally.
+        let item = NSMenuItem(
+            title: "Settings…",
+            action: #selector(handleOpenSettings),
+            keyEquivalent: ","
+        )
+        item.target = self
+        return item
+    }
+
     private func makeQuitItem() -> NSMenuItem {
         let item = NSMenuItem(title: "Quit", action: #selector(handleQuit), keyEquivalent: "q")
         item.target = self
@@ -370,6 +386,10 @@ final class StatusItemController: NSObject {
     @objc private func handleOpenPermission(_ sender: NSMenuItem) {
         guard let link = sender.representedObject as? PermissionDeepLink else { return }
         handlers.onOpenPermission(link)
+    }
+
+    @objc private func handleOpenSettings() {
+        handlers.onOpenSettings()
     }
 
     @objc private func handleQuit() {

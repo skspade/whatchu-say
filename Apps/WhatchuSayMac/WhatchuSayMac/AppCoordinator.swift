@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Audio
+import Core
 import Hotkey
 import Injector
 import Orchestrator
@@ -53,14 +54,31 @@ final class AppCoordinator {
     init(
         apiKey: String,
         state: AppState,
+        configStore: ConfigStore,
         recentTranscripts: RecentTranscriptsStore,
         errorLog: ErrorLogStore
     ) {
         self.state = state
         self.recentTranscripts = recentTranscripts
         self.errorLog = errorLog
+
+        // Snapshot the current config — these subsystems consume plain values,
+        // not the store itself. Live-reconfig wiring lands when the Settings
+        // panes ship (per docs/PLAN_SETTINGS.md §6 step 9 onward).
+        let appConfig = configStore.config
+
         let provider = ElevenLabsProvider(apiKey: apiKey)
-        let injector = InjectorMac()
+        let selector = StrategySelector(
+            defaultStrategy: appConfig.injection.defaultStrategy,
+            typeMaxChars: Int(appConfig.injection.typeMaxCharsForAuto),
+            terminalAllowlist: TerminalAllowlist.defaults
+                .union(appConfig.injection.terminalAllowlist),
+            perAppOverrides: appConfig.injection.perAppOverrides
+        )
+        let injector = InjectorMac(
+            selector: selector,
+            restoreClipboard: !appConfig.injection.leaveOnClipboard
+        )
         let stateMachine = ActivationStateMachine()
         let usage = UsageTracker()
         let audio = AVAudioCapture()
@@ -70,9 +88,18 @@ final class AppCoordinator {
             injector: injector,
             stateMachine: stateMachine,
             usage: usage,
-            audioCapture: audio
+            audioCapture: audio,
+            sessionConfig: SessionConfig(
+                language: appConfig.provider.language,
+                model: appConfig.provider.model,
+                hints: appConfig.provider.hints
+            )
         )
-        self.hotkeySource = HotkeySourceMac()
+        let bindings = HotkeyConfigTranslator.bindings(from: appConfig.hotkey)
+        self.hotkeySource = HotkeySourceMac(
+            activation: bindings.activation,
+            cancel: bindings.cancel
+        )
         self.hud = HUDController()
         let orchestrator = self.orchestrator
         self.sleepWake = SleepWakeObserver { [orchestrator] in

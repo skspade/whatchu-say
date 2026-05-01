@@ -34,6 +34,7 @@ public actor Orchestrator {
     private let usage: UsageTracker
     private let audioCapture: any AudioCapturing
     private let timerScheduler: any TimerScheduler
+    private let sessionConfig: SessionConfig
 
     private var currentSession: (any SttSession)?
     private var currentMode: ActivationMode = .pressHold
@@ -63,7 +64,8 @@ public actor Orchestrator {
         stateMachine: ActivationStateMachine,
         usage: UsageTracker,
         audioCapture: any AudioCapturing,
-        timerScheduler: any TimerScheduler = TaskTimerScheduler()
+        timerScheduler: any TimerScheduler = TaskTimerScheduler(),
+        sessionConfig: SessionConfig = SessionConfig()
     ) {
         self.provider = provider
         self.injector = injector
@@ -71,6 +73,7 @@ public actor Orchestrator {
         self.usage = usage
         self.audioCapture = audioCapture
         self.timerScheduler = timerScheduler
+        self.sessionConfig = sessionConfig
         let (stream, continuation) = AsyncStream<OrchestratorEvent>.makeStream()
         self.events = stream
         self.eventsContinuation = continuation
@@ -143,7 +146,7 @@ public actor Orchestrator {
 
     private func openSession(mode: ActivationMode) async {
         do {
-            let session = try await provider.open(config: SessionConfig())
+            let session = try await provider.open(config: sessionConfig)
             currentSession = session
             currentMode = mode
             sessionEpoch &+= 1

@@ -52,7 +52,8 @@ struct StatusItemMenuBuilderTests {
             onCopyErrorEntry: { _ in },
             onClearErrorLog: {},
             onDismissError: {},
-            onOpenPermission: { _ in }
+            onOpenPermission: { _ in },
+            onOpenSettings: {}
         )
     }
 
@@ -82,6 +83,24 @@ struct StatusItemMenuBuilderTests {
         let items = controller.makeMenuItems()
         let quit = items.first { $0.title == "Quit" }
         #expect(quit?.keyEquivalent == "q")
+    }
+
+    @Test("Settings… item is present, has ⌘, and sits directly above Quit")
+    func settingsItemShape() {
+        let controller = makeController()
+        let items = controller.makeMenuItems()
+        let allTitles = titles(of: items)
+        #expect(allTitles.contains("Settings…"))
+
+        let settings = items.first { $0.title == "Settings…" }
+        #expect(settings?.keyEquivalent == ",")
+
+        guard let settingsIndex = items.firstIndex(where: { $0.title == "Settings…" }),
+              let quitIndex = items.firstIndex(where: { $0.title == "Quit" }) else {
+            Issue.record("expected both Settings… and Quit items")
+            return
+        }
+        #expect(quitIndex == settingsIndex + 1)
     }
 
     @Test("status header is disabled (non-clickable label)")
@@ -249,12 +268,13 @@ struct StatusItemMenuBuilderTests {
         #expect(items[3].isSeparatorItem)
     }
 
-    @Test("menu ends with separator + Quit")
+    @Test("menu ends with separator + Settings… + Quit")
     func menuEndsWithQuit() {
         let controller = makeController()
         let items = controller.makeMenuItems()
-        #expect(items.count >= 2)
+        #expect(items.count >= 3)
         #expect(items[items.count - 1].title == "Quit")
-        #expect(items[items.count - 2].isSeparatorItem)
+        #expect(items[items.count - 2].title == "Settings…")
+        #expect(items[items.count - 3].isSeparatorItem)
     }
 }
