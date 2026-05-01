@@ -62,15 +62,15 @@ Effort estimates assume one developer working consistently, not full-time. Phase
 
 **Outcome**: app handles permissions cleanly, has a usable settings UI, has the floating overlay, and supports cancellation.
 
-**Status (2026-04-30)**: ~45% — overlay (HUD), Esc-cancel, Keychain API-key, and permission fix-it deep links are in. No Settings window, no onboarding, no privacy pane, no per-app override UI. Settings/onboarding/privacy is the largest remaining gap in Phase 1.
+**Status (2026-05-01)**: ~85% — overlay (HUD), Esc-cancel, Keychain API-key, permission fix-it deep links, **the Settings window with all six panes**, **first-run privacy disclosure modal**, and **per-app injection override UI** are in. The remaining gap is the full onboarding wizard (permission status panes); the privacy slice of onboarding ships as the first-run modal. Live re-config of the running orchestrator is a documented follow-up — see [PLAN_LIVE_RECONFIG.md](./PLAN_LIVE_RECONFIG.md).
 
-- ❌ First-run onboarding flow with permission status panes.
-- ❌ Privacy disclosure pane on first run.
-- ❌ Settings window: provider config, hotkey rebinding, cancel-key rebinding, injection preferences, overlay anchor preference.
-- ✅ API key entry and Keychain persistence.
+- ❌ First-run onboarding flow with permission status panes. *(Privacy disclosure is covered by the first-run modal; the Accessibility + Microphone walkthrough panes are still missing.)*
+- ✅ Privacy disclosure pane on first run. *(`FirstRunDisclosure` modal blocks bootstrap until acknowledged; reusable `DisclosureContent` view also rendered in the Privacy settings pane.)*
+- ✅ Settings window with six toolbar tabs — General, Provider, Shortcuts, Output, History, Privacy. Provider config, hotkey rebinding (custom recorder widget), cancel-key rebinding, injection preferences, overlay anchor preference, Reset to Defaults. *(See [PLAN_SETTINGS.md](./PLAN_SETTINGS.md). Provider/Output/Shortcuts changes require coordinator restart to take effect — live re-config is a follow-up.)*
+- ✅ API key entry and Keychain persistence. *(Provider pane is the canonical home; menubar "Update API Key…" entry shares the same save path via `APIKeyController`. Test Connection button does a handshake-only validation.)*
 - ✅ **Floating overlay UI** (`Sources/PlatformApple/Mac/Overlay/`): NSPanel + VU meter view + lifecycle integration. *(Implemented under `Apps/WhatchuSayMac/WhatchuSayMac/HUD/` rather than the originally planned path.)*
 - ✅ **Cancellation flow**: second `CGEventTap` filter for cancel key; consume only during dictation states; orchestrator handles `.cancelDictation`. *(Gate driven by `setDictating(_:)` from orchestrator session events.)*
-- ⚠️ Per-app injection override UI. *(`StrategySelector.perAppOverrides` infrastructure exists; no UI to edit it.)*
+- ✅ Per-app injection override UI. *(Output pane → "Per-app overrides" table with `RunningAppPicker` sheet; `StrategySelector` now also honors a global `defaultStrategy` field, covered by `Tests/InjectorTests`.)*
 - ✅ Permission-fix-it deep links to System Settings. *(`PermissionDeepLink` covers Accessibility and Microphone panes; `HotkeySourceError.accessibilityDenied` and orchestrator `.permissionDenied(.microphone)` both route into the menubar fix-it button.)*
 
 **Exit criteria**: a fresh user account can install, walk through onboarding (including privacy disclosure), and dictate within 5 minutes. Cancellation works in both press-hold and (stub) hands-free.
