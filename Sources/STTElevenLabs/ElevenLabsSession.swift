@@ -29,6 +29,10 @@ public actor ElevenLabsSession: SttSession {
     private let sampleRate: Int
     private var receiveTask: Task<Void, Never>?
     private var closed = false
+    /// Set after `endOfStream()` sends the commit. Once true, a subsequent
+    /// `receive()` failure is the server's expected post-EOS WebSocket close,
+    /// not an error worth surfacing to the user.
+    private var commitSent = false
 
     init(
         apiKey: String,
@@ -104,6 +108,7 @@ public actor ElevenLabsSession: SttSession {
             previousText: nil
         )
         try await send(chunk)
+        commitSent = true
     }
 
     public func close() async {
@@ -158,8 +163,15 @@ public actor ElevenLabsSession: SttSession {
         do {
             message = try await receiveOne()
         } catch {
-            print("[ElevenLabs] websocket recv error: \(error.localizedDescription)")
-            eventsContinuation.yield(.warning("websocket error: \(error.localizedDescription)"))
+            if commitSent {
+                // Expected: server closes the WebSocket after responding to
+                // the EOS commit. Tear down quietly so the orchestrator's
+                // finalize path doesn't surface a spurious "error" toast.
+                print("[ElevenLabs] websocket closed after EOS commit")
+            } else {
+                print("[ElevenLabs] websocket recv error: \(error.localizedDescription)")
+                eventsContinuation.yield(.warning("websocket error: \(error.localizedDescription)"))
+            }
             await tearDown()
             return false
         }

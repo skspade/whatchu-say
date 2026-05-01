@@ -48,10 +48,24 @@ public actor Orchestrator {
     /// (epoch unchanged → unexpected) vs "we closed it" (epoch bumped → no-op).
     private var sessionEpoch: UInt64 = 0
 
-    /// Captured final transcript text when it arrives ahead of the
-    /// `awaitFinal()` caller. Cleared on consumption or session swap.
-    private var pendingFinal: String?
-    private var finalWaiters: [CheckedContinuation<String?, Never>] = []
+    /// Accumulator for every `.final` event from the current session. The
+    /// streaming provider commits a separate `committed_transcript` per
+    /// pause-segment, plus one final commit in response to `endOfStream` —
+    /// they must all be concatenated, not overwritten. Cleared on session
+    /// swap or after `awaitFinal()` consumes it.
+    private var accumulatedFinal: String = ""
+    /// Single waiter for `finalizeAndInject` to suspend on while the session's
+    /// events stream drains. Resumed by `handleSessionStreamEnded` (server
+    /// closed after EOS) or by `closeCurrentSession` (cancel/teardown).
+    private var finalizationWaiter: CheckedContinuation<Void, Never>?
+    /// Set when `handleSessionStreamEnded` runs, so a late `awaitFinal()`
+    /// caller can return the accumulated text synchronously instead of
+    /// dangling on a continuation that will never be resumed.
+    private var eventsStreamFinished: Bool = false
+    /// True from the first line of `finalizeAndInject` until it returns. Lets
+    /// `handleSessionStreamEnded` distinguish "expected close after EOS"
+    /// (defer to finalize) from "unexpected teardown" (run interrupt+reset).
+    private var finalizing: Bool = false
     /// Resumed by the audio forwarder when it consumes the end-of-session
     /// sentinel frame yielded by `audioCapture.stop()`. Used by
     /// `stopAndDrainAudio` to know all captured frames have been forwarded
@@ -162,6 +176,8 @@ public actor Orchestrator {
 
     private func finalizeAndInject() async {
         guard let session = currentSession else { return }
+        finalizing = true
+        defer { finalizing = false }
 
         // Stop audio capture and wait for the forwarder to drain every
         // captured frame into the session BEFORE committing. Without this,
@@ -279,8 +295,8 @@ public actor Orchestrator {
     }
 
     /// Tear down the current session: cancel its event consumer, close the
-    /// session, drop captured-final state, and resume any waiters with `nil`
-    /// so they don't dangle.
+    /// session, drop captured-final state, and resume any waiter so it
+    /// doesn't dangle.
     private func closeCurrentSession() async {
         // Bump the epoch BEFORE the consumer's events stream finishes so the
         // post-loop `handleSessionStreamEnded` sees a stale epoch and skips
@@ -292,11 +308,11 @@ public actor Orchestrator {
             await session.close()
         }
         currentSession = nil
-        pendingFinal = nil
-        let waiters = finalWaiters
-        finalWaiters.removeAll()
-        for waiter in waiters {
-            waiter.resume(returning: nil)
+        accumulatedFinal = ""
+        eventsStreamFinished = false
+        if let waiter = finalizationWaiter {
+            finalizationWaiter = nil
+            waiter.resume()
         }
     }
 
@@ -315,13 +331,27 @@ public actor Orchestrator {
         }
     }
 
-    /// Called when a session's events stream finishes. If the epoch we
-    /// captured at consumer-start time still matches `sessionEpoch`, this is
-    /// an unexpected teardown (server error, network drop, etc.) and we run
-    /// the same recovery flow as `handleSystemSleep`. Otherwise we already
-    /// initiated the close and there's nothing to do.
+    /// Called when a session's events stream finishes. Three cases:
+    /// 1. We already initiated the close (epoch bumped) — no-op.
+    /// 2. `finalizeAndInject` is waiting on the events stream to drain (the
+    ///    expected EOS-then-WS-close path) — wake it so it can collect the
+    ///    accumulated transcript and own the cleanup.
+    /// 3. Unexpected teardown (server error, network drop) — run the same
+    ///    recovery flow as `handleSystemSleep`.
     private func handleSessionStreamEnded(epoch: UInt64) async {
         guard epoch == sessionEpoch else { return }
+        eventsStreamFinished = true
+        if let waiter = finalizationWaiter {
+            finalizationWaiter = nil
+            waiter.resume()
+            return
+        }
+        if finalizing {
+            // Race: stream finished after `endOfStream` but before `awaitFinal`
+            // installed its waiter. The flag we just set lets `awaitFinal`
+            // return the accumulated text synchronously without dangling.
+            return
+        }
         await interruptAndReset()
     }
 
@@ -330,11 +360,14 @@ public actor Orchestrator {
         case .partial(let text, _):
             eventsContinuation.yield(.partial(text: text))
         case .final(let text, _):
-            if let waiter = finalWaiters.first {
-                finalWaiters.removeFirst()
-                waiter.resume(returning: text)
+            // Accumulate every commit. The streaming provider sends one per
+            // pause-segment plus one for the EOS commit; overwriting here
+            // would lose every segment except the last to arrive.
+            guard !text.isEmpty else { return }
+            if accumulatedFinal.isEmpty {
+                accumulatedFinal = text
             } else {
-                pendingFinal = text
+                accumulatedFinal += " " + text
             }
         case .warning(let message):
             eventsContinuation.yield(.error(text: message))
@@ -343,16 +376,20 @@ public actor Orchestrator {
         }
     }
 
-    /// Suspend until the current session's `.final` arrives. Resumes with
-    /// `nil` if the session is torn down before a final lands.
+    /// Suspend until the session's events stream finishes (server closes the
+    /// connection after the EOS commit), then return the accumulated transcript.
+    /// Returns `nil` if no `.final` events ever arrived, or if the session was
+    /// torn down before any commit.
     private func awaitFinal() async -> String? {
-        if let text = pendingFinal {
-            pendingFinal = nil
-            return text
+        if !eventsStreamFinished {
+            await withCheckedContinuation { continuation in
+                finalizationWaiter = continuation
+            }
         }
-        return await withCheckedContinuation { continuation in
-            finalWaiters.append(continuation)
-        }
+        let text = accumulatedFinal
+        accumulatedFinal = ""
+        eventsStreamFinished = false
+        return text.isEmpty ? nil : text
     }
 
     // MARK: - Audio forwarding

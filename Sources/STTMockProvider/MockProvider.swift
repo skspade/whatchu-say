@@ -30,6 +30,7 @@ public actor MockSession: SttSession {
     private let continuation: AsyncStream<SttEvent>.Continuation
     private let cannedFinal: String
     private var samplesReceived: Int = 0
+    private var closed: Bool = false
 
     public init(cannedFinal: String) {
         let (stream, cont) = AsyncStream<SttEvent>.makeStream()
@@ -44,9 +45,18 @@ public actor MockSession: SttSession {
 
     public func endOfStream() async throws {
         continuation.yield(.final(text: cannedFinal, alternatives: []))
+        // Mirror the real provider: server closes the WebSocket after the
+        // EOS commit, which finishes the events stream.
+        finishOnce()
     }
 
     public func close() async {
+        finishOnce()
+    }
+
+    private func finishOnce() {
+        guard !closed else { return }
+        closed = true
         continuation.finish()
     }
 }

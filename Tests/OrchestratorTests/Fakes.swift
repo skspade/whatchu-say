@@ -162,7 +162,10 @@ actor ScriptableProvider: SttProvider {
 }
 
 /// Test-controlled STT session. The events stream is driven by the test via
-/// `yield*` calls; `endOfStream()` does not auto-emit a `.final`.
+/// `yield*` calls; `endOfStream()` does not auto-emit a `.final` but it does
+/// finish the events stream — mirrors the real provider, which closes the
+/// WebSocket after responding to EOS so the orchestrator's `awaitFinal()` knows
+/// "no more commits are coming."
 final class ScriptableSession: SttSession, @unchecked Sendable {
     nonisolated let events: AsyncStream<SttEvent>
     private let continuation: AsyncStream<SttEvent>.Continuation
@@ -174,7 +177,7 @@ final class ScriptableSession: SttSession, @unchecked Sendable {
     }
 
     func pushAudio(_ samples: [Int16]) async throws {}
-    func endOfStream() async throws {}
+    func endOfStream() async throws { continuation.finish() }
     func close() async { continuation.finish() }
 
     func yieldPartial(_ text: String, stability: Float = 0.5) {
@@ -254,11 +257,90 @@ actor RecordingSession: SttSession {
         endOfStreamSeen = true
         let text = framesBeforeEOS.map { String($0.first ?? 0) }.joined(separator: ",")
         continuation.yield(.final(text: text, alternatives: []))
+        // Mirror real provider: WS closes after EOS commit, finishing the events stream.
+        guard !closed else { return }
+        closed = true
+        continuation.finish()
     }
 
     func close() async {
         guard !closed else { return }
         closed = true
+        continuation.finish()
+    }
+}
+
+// MARK: - MultiSegmentProvider / MultiSegmentSession
+
+/// Provider whose sessions model ElevenLabs streaming with `commit_strategy=auto`:
+/// the server commits a separate `committed_transcript` per pause-segment during
+/// the session, plus one final commit in response to `end_of_stream`, then closes
+/// the WebSocket. Tests pre-load the during-session segments via `yieldFinal`
+/// and the post-EOS commit via `setEndOfStreamFinal`.
+///
+/// Mirrors the real provider's lifecycle in two key ways:
+/// 1. Multiple `.final` events can arrive for a single session (one per segment).
+/// 2. The events stream finishes after `endOfStream` (real WS closes after the
+///    EOS commit). The orchestrator relies on this signal to know "no more
+///    finals are coming" and return the accumulated transcript.
+actor MultiSegmentProvider: SttProvider {
+    nonisolated let name = "multi-segment"
+    nonisolated let capabilities = Capabilities(
+        partials: true,
+        punctuation: true,
+        languages: .auto,
+        sampleRates: [16_000],
+        maxSessionSeconds: nil,
+        supportsClientEndpointing: true
+    )
+
+    private(set) var sessions: [MultiSegmentSession] = []
+
+    func open(config: SessionConfig) async throws -> any SttSession {
+        let session = MultiSegmentSession()
+        sessions.append(session)
+        return session
+    }
+
+    var lastSession: MultiSegmentSession? { sessions.last }
+}
+
+actor MultiSegmentSession: SttSession {
+    nonisolated let events: AsyncStream<SttEvent>
+    private nonisolated let continuation: AsyncStream<SttEvent>.Continuation
+
+    private var endOfStreamFinal: String?
+
+    init() {
+        let (stream, cont) = AsyncStream<SttEvent>.makeStream()
+        self.events = stream
+        self.continuation = cont
+    }
+
+    /// Yield a pause-segment commit. Mirrors a `committed_transcript` arriving
+    /// from the server while the user is still talking. `nonisolated` so tests
+    /// can drive it synchronously without awaiting the actor.
+    nonisolated func yieldFinal(_ text: String) {
+        continuation.yield(.final(text: text, alternatives: []))
+    }
+
+    /// Pre-load the text the session will commit in response to `endOfStream`.
+    /// Pass `nil` to commit nothing (just close the events stream).
+    func setEndOfStreamFinal(_ text: String?) {
+        endOfStreamFinal = text
+    }
+
+    func pushAudio(_ samples: [Int16]) async throws {}
+
+    func endOfStream() async throws {
+        if let text = endOfStreamFinal {
+            continuation.yield(.final(text: text, alternatives: []))
+        }
+        // Mirror the real provider: server closes WS after the EOS commit.
+        continuation.finish()
+    }
+
+    func close() async {
         continuation.finish()
     }
 }
