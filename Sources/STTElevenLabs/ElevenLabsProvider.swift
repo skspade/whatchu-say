@@ -32,4 +32,8 @@ public struct ElevenLabsProvider: SttProvider {
         try await session.start()
         return session
     }
+
+    public var batchTranscriber: (any BatchTranscriber)? {
+        ElevenLabsBatchTranscriber(apiKey: apiKey, urlSession: urlSession)
+    }
 }
