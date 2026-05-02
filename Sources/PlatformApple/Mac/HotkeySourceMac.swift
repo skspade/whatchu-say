@@ -69,6 +69,8 @@ public actor HotkeySourceMac: HotkeySource {
             throw HotkeySourceError.accessibilityDenied
         }
 
+        context.setTap(tap)
+
         guard let runLoopSource = CFMachPortCreateRunLoopSource(
             kCFAllocatorDefault, tap, 0
         ) else {
@@ -144,7 +146,9 @@ func shouldConsume(translated: HotkeyEvent?, isDictating: Bool) -> Bool {
 private final class TapContext: @unchecked Sendable {
     let translator: HotkeyEventTranslator
     let continuation: AsyncStream<HotkeyEvent>.Continuation
+    private struct TapBox: @unchecked Sendable { var port: CFMachPort? }
     private let dictating = OSAllocatedUnfairLock<Bool>(initialState: false)
+    private let tapRef = OSAllocatedUnfairLock<TapBox>(initialState: TapBox())
 
     init(
         translator: HotkeyEventTranslator,
@@ -152,6 +156,31 @@ private final class TapContext: @unchecked Sendable {
     ) {
         self.translator = translator
         self.continuation = continuation
+    }
+
+    func setTap(_ tap: CFMachPort) {
+        tapRef.withLockUnchecked { $0.port = tap }
+    }
+
+    func reenableTap() {
+        tapRef.withLockUnchecked { box in
+            if let tap = box.port { CGEvent.tapEnable(tap: tap, enable: true) }
+        }
+        recoverLostKeyUp()
+    }
+
+    /// After a tap-disabled window, the `flagsChanged` event for the
+    /// activation modifier's release may have been lost. Check the live
+    /// modifier state; if the key is no longer held, synthesize a `.keyUp`
+    /// so the session doesn't hang waiting for a release that already
+    /// happened.
+    private func recoverLostKeyUp() {
+        guard let pressFlag = translator.activation.pressFlag else { return }
+        let currentFlags = CGEventSource.flagsState(.combinedSessionState)
+        if !currentFlags.contains(pressFlag) {
+            print("[HotkeySource] tap re-enabled: activation modifier released while tap was disabled — synthesizing keyUp")
+            continuation.yield(.keyUp(at: Date()))
+        }
     }
 
     func setDictating(_ active: Bool) {
@@ -185,10 +214,11 @@ private final class TapContext: @unchecked Sendable {
 /// passed through `userInfo` (refcon) as an opaque pointer.
 private let hotkeyTapCallback: CGEventTapCallBack = { _, type, event, refcon in
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-        // macOS occasionally disables long-running taps. Re-enabling needs
-        // the CFMachPort, which the callback doesn't receive directly.
-        // Surfaced via the next event burst; if this becomes a real
-        // problem, store the port in TapContext and re-enable here.
+        print("[HotkeySource] tap disabled by \(type == .tapDisabledByTimeout ? "timeout" : "userInput") — re-enabling")
+        if let refcon {
+            let context = Unmanaged<TapContext>.fromOpaque(refcon).takeUnretainedValue()
+            context.reenableTap()
+        }
         return Unmanaged.passUnretained(event)
     }
     if let refcon {
