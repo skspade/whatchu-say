@@ -345,6 +345,71 @@ actor MultiSegmentSession: SttSession {
     }
 }
 
+// MARK: - DelayedCloseProvider / DelayedCloseSession
+
+/// Provider whose sessions yield a committed transcript in response to
+/// `endOfStream()` but do NOT finish the events stream — simulating a slow
+/// WebSocket close after the server has already sent the committed transcript.
+actor DelayedCloseProvider: SttProvider {
+    nonisolated let name = "delayed-close"
+    nonisolated let capabilities = Capabilities(
+        partials: true,
+        punctuation: true,
+        languages: .auto,
+        sampleRates: [16_000],
+        maxSessionSeconds: nil,
+        supportsClientEndpointing: true
+    )
+
+    private(set) var sessions: [DelayedCloseSession] = []
+
+    func open(config: SessionConfig) async throws -> any SttSession {
+        let session = DelayedCloseSession()
+        sessions.append(session)
+        return session
+    }
+
+    var lastSession: DelayedCloseSession? { sessions.last }
+}
+
+/// Session that yields a `.final` on `endOfStream()` but keeps the events
+/// stream open until `close()` or `finishStream()` is called. Models the
+/// real-world case where ElevenLabs responds with a committed transcript
+/// promptly but is slow to close the WebSocket.
+actor DelayedCloseSession: SttSession {
+    nonisolated let events: AsyncStream<SttEvent>
+    private nonisolated let continuation: AsyncStream<SttEvent>.Continuation
+
+    private var committedText: String = "delayed close transcription"
+    private var closed = false
+
+    init() {
+        let (stream, cont) = AsyncStream<SttEvent>.makeStream()
+        self.events = stream
+        self.continuation = cont
+    }
+
+    func setCommittedText(_ text: String) {
+        committedText = text
+    }
+
+    func pushAudio(_ samples: [Int16]) async throws {}
+
+    func endOfStream() async throws {
+        continuation.yield(.final(text: committedText, alternatives: []))
+    }
+
+    func close() async {
+        guard !closed else { return }
+        closed = true
+        continuation.finish()
+    }
+
+    nonisolated func finishStream() {
+        continuation.finish()
+    }
+}
+
 // MARK: - EventCollector
 
 /// Drains an `AsyncStream<OrchestratorEvent>` into an array so tests can

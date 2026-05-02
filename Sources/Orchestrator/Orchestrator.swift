@@ -54,14 +54,20 @@ public actor Orchestrator {
     /// they must all be concatenated, not overwritten. Cleared on session
     /// swap or after `awaitFinal()` consumes it.
     private var accumulatedFinal: String = ""
-    /// Single waiter for `finalizeAndInject` to suspend on while the session's
-    /// events stream drains. Resumed by `handleSessionStreamEnded` (server
-    /// closed after EOS) or by `closeCurrentSession` (cancel/teardown).
+    /// Single waiter for `finalizeAndInject` to suspend on while waiting for
+    /// the committed transcript. Resumed by `handleSessionEvent` (post-commit
+    /// `.final` arrived), `handleSessionStreamEnded` (server closed after EOS),
+    /// or `closeCurrentSession` (cancel/teardown).
     private var finalizationWaiter: CheckedContinuation<Void, Never>?
     /// Set when `handleSessionStreamEnded` runs, so a late `awaitFinal()`
     /// caller can return the accumulated text synchronously instead of
     /// dangling on a continuation that will never be resumed.
     private var eventsStreamFinished: Bool = false
+    /// Set when a `.final` event arrives while `finalizing` is true — i.e.
+    /// the committed transcript in response to our EOS commit. Lets
+    /// `awaitFinal()` return immediately without waiting for the events
+    /// stream to finish (WebSocket close), which can be delayed.
+    private var postCommitFinalReceived: Bool = false
     /// True from the first line of `finalizeAndInject` until it returns. Lets
     /// `handleSessionStreamEnded` distinguish "expected close after EOS"
     /// (defer to finalize) from "unexpected teardown" (run interrupt+reset).
@@ -97,6 +103,7 @@ public actor Orchestrator {
     /// output (synchronously from the caller's perspective — when this returns,
     /// session changes, finalization, and injection are all complete).
     public func handle(hotkeyEvent: HotkeyEvent) async {
+        print("[Orchestrator] handle(hotkeyEvent: \(hotkeyEvent))")
         let outputs = await stateMachine.handle(hotkeyEvent)
         for output in outputs {
             await apply(output)
@@ -117,6 +124,7 @@ public actor Orchestrator {
     // MARK: - Output dispatch
 
     private func apply(_ output: HotkeyOutput) async {
+        print("[Orchestrator] apply: \(output)")
         switch output {
         case .startDictation(let mode):
             await startDictation(mode: mode)
@@ -175,9 +183,16 @@ public actor Orchestrator {
     }
 
     private func finalizeAndInject() async {
-        guard let session = currentSession else { return }
+        guard let session = currentSession else {
+            print("[Orchestrator] finalizeAndInject: no current session, bailing")
+            return
+        }
+        print("[Orchestrator] finalizeAndInject: ENTER (epoch=\(sessionEpoch))")
         finalizing = true
-        defer { finalizing = false }
+        defer {
+            finalizing = false
+            print("[Orchestrator] finalizeAndInject: EXIT")
+        }
 
         // Stop audio capture and wait for the forwarder to drain every
         // captured frame into the session BEFORE committing. Without this,
@@ -188,22 +203,35 @@ public actor Orchestrator {
         // by `handleSessionStreamEnded` (server-side error etc.), which has
         // already emitted `.sessionEnded(nil)` and reset the FSM. Bail out
         // quietly to avoid a duplicate `.sessionEnded` and a doomed `awaitFinal`.
-        if currentSession == nil { return }
+        if currentSession == nil {
+            print("[Orchestrator] finalizeAndInject: session gone after drain, bailing")
+            return
+        }
 
         try? await session.endOfStream()
-        if currentSession == nil { return }
+        if currentSession == nil {
+            print("[Orchestrator] finalizeAndInject: session gone after EOS, bailing")
+            return
+        }
         eventsContinuation.yield(.finalizing)
 
         let finalText = await awaitFinal()
-        if currentSession == nil { return }
+        print("[Orchestrator] finalizeAndInject: awaitFinal returned \(finalText == nil ? "nil" : "'\(finalText!)'")")
+        if currentSession == nil {
+            print("[Orchestrator] finalizeAndInject: session gone after awaitFinal, bailing")
+            return
+        }
 
         await closeCurrentSession()
 
         let injected: String?
         if let text = finalText, !text.isEmpty {
+            print("[Orchestrator] finalizeAndInject: INJECTING '\(text)'")
             try? await injector.inject(text: text, hint: .auto)
+            print("[Orchestrator] finalizeAndInject: injection complete")
             injected = text
         } else {
+            print("[Orchestrator] finalizeAndInject: nothing to inject")
             injected = nil
         }
 
@@ -212,6 +240,7 @@ public actor Orchestrator {
             await usage.recordSession(durationMs: durationMs, provider: provider.name)
         }
         sessionStartedAt = nil
+        print("[Orchestrator] finalizeAndInject: yielding .sessionEnded")
         eventsContinuation.yield(.sessionEnded(injectedText: injected))
     }
 
@@ -310,6 +339,7 @@ public actor Orchestrator {
         currentSession = nil
         accumulatedFinal = ""
         eventsStreamFinished = false
+        postCommitFinalReceived = false
         if let waiter = finalizationWaiter {
             finalizationWaiter = nil
             waiter.resume()
@@ -339,19 +369,23 @@ public actor Orchestrator {
     /// 3. Unexpected teardown (server error, network drop) — run the same
     ///    recovery flow as `handleSystemSleep`.
     private func handleSessionStreamEnded(epoch: UInt64) async {
-        guard epoch == sessionEpoch else { return }
+        guard epoch == sessionEpoch else {
+            print("[Orchestrator] streamEnded: stale epoch \(epoch) vs \(sessionEpoch), skipping")
+            return
+        }
+        print("[Orchestrator] streamEnded: epoch=\(epoch) finalizing=\(finalizing) waiter=\(finalizationWaiter != nil)")
         eventsStreamFinished = true
         if let waiter = finalizationWaiter {
             finalizationWaiter = nil
+            print("[Orchestrator] streamEnded: resuming finalization waiter")
             waiter.resume()
             return
         }
         if finalizing {
-            // Race: stream finished after `endOfStream` but before `awaitFinal`
-            // installed its waiter. The flag we just set lets `awaitFinal`
-            // return the accumulated text synchronously without dangling.
+            print("[Orchestrator] streamEnded: finalizing in progress, flag set for sync pickup")
             return
         }
+        print("[Orchestrator] streamEnded: unexpected teardown — running interruptAndReset")
         await interruptAndReset()
     }
 
@@ -360,14 +394,22 @@ public actor Orchestrator {
         case .partial(let text, _):
             eventsContinuation.yield(.partial(text: text))
         case .final(let text, _):
-            // Accumulate every commit. The streaming provider sends one per
-            // pause-segment plus one for the EOS commit; overwriting here
-            // would lose every segment except the last to arrive.
             guard !text.isEmpty else { return }
+            print("[Orchestrator] .final received: '\(text)' (finalizing=\(finalizing), accumulated='\(accumulatedFinal)')")
             if accumulatedFinal.isEmpty {
                 accumulatedFinal = text
             } else {
                 accumulatedFinal += " " + text
+            }
+            if finalizing {
+                postCommitFinalReceived = true
+                if let waiter = finalizationWaiter {
+                    finalizationWaiter = nil
+                    print("[Orchestrator] .final: resuming finalization waiter")
+                    waiter.resume()
+                } else {
+                    print("[Orchestrator] .final: no waiter, flag set for sync pickup")
+                }
             }
         case .warning(let message):
             eventsContinuation.yield(.error(text: message))
@@ -376,19 +418,23 @@ public actor Orchestrator {
         }
     }
 
-    /// Suspend until the session's events stream finishes (server closes the
-    /// connection after the EOS commit), then return the accumulated transcript.
-    /// Returns `nil` if no `.final` events ever arrived, or if the session was
-    /// torn down before any commit.
+    /// Suspend until the committed transcript arrives (post-commit `.final`)
+    /// or the session's events stream finishes, then return the accumulated
+    /// transcript. Returns `nil` if no `.final` events ever arrived, or if
+    /// the session was torn down before any commit.
     private func awaitFinal() async -> String? {
-        if !eventsStreamFinished {
+        print("[Orchestrator] awaitFinal: postCommit=\(postCommitFinalReceived) streamFinished=\(eventsStreamFinished) accumulated='\(accumulatedFinal)'")
+        if !eventsStreamFinished && !postCommitFinalReceived {
+            print("[Orchestrator] awaitFinal: suspending on continuation")
             await withCheckedContinuation { continuation in
                 finalizationWaiter = continuation
             }
+            print("[Orchestrator] awaitFinal: resumed (postCommit=\(postCommitFinalReceived) streamFinished=\(eventsStreamFinished) accumulated='\(accumulatedFinal)')")
         }
         let text = accumulatedFinal
         accumulatedFinal = ""
         eventsStreamFinished = false
+        postCommitFinalReceived = false
         return text.isEmpty ? nil : text
     }
 
