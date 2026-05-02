@@ -14,7 +14,7 @@ import Foundation
 ///   When v2 lands, migration handlers run *before* `JSONDecoder` to inject
 ///   defaults for new fields.
 public struct AppConfig: Codable, Sendable, Equatable {
-    public static let currentSchemaVersion: UInt32 = 1
+    public static let currentSchemaVersion: UInt32 = 2
 
     public var schemaVersion: UInt32
     public var provider: ProviderConfig
@@ -25,6 +25,7 @@ public struct AppConfig: Codable, Sendable, Equatable {
     public var usage: UsageConfig
     public var overlay: OverlayConfig
     public var privacy: PrivacyConfig
+    public var meetings: MeetingsConfig
 
     public init(
         schemaVersion: UInt32 = AppConfig.currentSchemaVersion,
@@ -35,7 +36,8 @@ public struct AppConfig: Codable, Sendable, Equatable {
         history: HistoryConfig = HistoryConfig(),
         usage: UsageConfig = UsageConfig(),
         overlay: OverlayConfig = OverlayConfig(),
-        privacy: PrivacyConfig = PrivacyConfig()
+        privacy: PrivacyConfig = PrivacyConfig(),
+        meetings: MeetingsConfig = MeetingsConfig()
     ) {
         self.schemaVersion = schemaVersion
         self.provider = provider
@@ -46,6 +48,7 @@ public struct AppConfig: Codable, Sendable, Equatable {
         self.usage = usage
         self.overlay = overlay
         self.privacy = privacy
+        self.meetings = meetings
     }
 }
 
@@ -245,5 +248,23 @@ public struct PrivacyConfig: Codable, Sendable, Equatable {
     ) {
         self.hasReadDisclosure = hasReadDisclosure
         self.disclosureAcknowledgedAt = disclosureAcknowledgedAt
+    }
+}
+
+// MARK: - Meetings
+
+public struct MeetingsConfig: Codable, Sendable, Equatable {
+    public var showAttendeeFieldAtStart: Bool
+    public var showConsentReminder: Bool
+    public var deleteAudioAfterTranscription: Bool
+
+    public init(
+        showAttendeeFieldAtStart: Bool = true,
+        showConsentReminder: Bool = true,
+        deleteAudioAfterTranscription: Bool = true
+    ) {
+        self.showAttendeeFieldAtStart = showAttendeeFieldAtStart
+        self.showConsentReminder = showConsentReminder
+        self.deleteAudioAfterTranscription = deleteAudioAfterTranscription
     }
 }

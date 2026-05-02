@@ -8,7 +8,7 @@ struct AppConfigDefaultsTests {
     func freshDefaults() {
         let config = AppConfig()
 
-        #expect(config.schemaVersion == 1)
+        #expect(config.schemaVersion == 2)
 
         #expect(config.provider.providerName == "elevenlabs")
         #expect(config.provider.model == nil)
@@ -43,6 +43,10 @@ struct AppConfigDefaultsTests {
 
         #expect(config.privacy.hasReadDisclosure == false)
         #expect(config.privacy.disclosureAcknowledgedAt == nil)
+
+        #expect(config.meetings.showAttendeeFieldAtStart == true)
+        #expect(config.meetings.showConsentReminder == true)
+        #expect(config.meetings.deleteAudioAfterTranscription == true)
     }
 }
 
@@ -106,7 +110,7 @@ struct AppConfigCodableTests {
     func schemaVersionInJSON() throws {
         let data = try JSONEncoder().encode(AppConfig())
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        #expect(object?["schemaVersion"] as? UInt32 == 1)
+        #expect(object?["schemaVersion"] as? UInt32 == 2)
     }
 }
 
