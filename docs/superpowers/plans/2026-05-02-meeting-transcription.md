@@ -15,6 +15,7 @@
 ## Project conventions to follow
 
 - **Build the Mac app in Xcode IDE only.** Never run `xcodebuild` against the `WhatchuSayMac` target — ad-hoc signing breaks TCC permission grants. Use `make install` after Xcode builds Debug. Library targets (everything in `Sources/`) build and test fine via `swift build` / `swift test`.
+- **Do not raise `Package.swift`'s `.macOS(.v14)` platform floor.** Meeting capture is gated `@available(macOS 15, *)` per file. Bumping the package floor would break dictation on macOS 14, which is supported.
 - **Tests use Swift Testing**, not XCTest: `import Testing`, `@Suite`/`@Test`/`#expect`. See `Tests/AudioTests/AudioTests.swift` for the canonical shape.
 - **Swift 6 strict concurrency.** All shared mutable state must be actor-isolated or `Sendable`.
 - **Do not modify** `Sources/Orchestrator/`, `Sources/Audio/AVAudioCapture.swift`, the dictation hotkey path, or any FSM logic. Meeting flow is fully sibling.
@@ -69,9 +70,9 @@
 `Apps/WhatchuSayMac/WhatchuSayMac/Meeting/`
 - `MeetingMenuBarController.swift` — owns the Start meeting recording menu entry + recording-state UI (timer, Stop)
 - `StartMeetingModal.swift` — consent reminder + attendees field + Start/Cancel
-- `TranscriptWindow.swift` + `TranscriptView.swift` — list view of segments, attendee chip input, rename context menu
-- `MeetingsLibraryWindow.swift` — list of past meetings (deferred to last task; small)
+- `TranscriptWindow.swift` + `TranscriptView.swift` — list view of segments, attendee chip input, rename context menu, delete-transcript and keep-audio controls
 - `MeetingsCoordinator.swift` — glue between AppCoordinator, MeetingOrchestrator, and the windows above
+- `RecoveryPrompt.swift` — launch-time prompt when a half-written meeting is detected on disk
 
 `Apps/WhatchuSayMac/WhatchuSayMac/Settings/`
 - `MeetingsPane.swift` — **new** Settings pane (mirrors existing `PrivacyPane.swift` shape)
@@ -1521,6 +1522,8 @@ public var batchTranscriber: (any BatchTranscriber)? {
 }
 ```
 
+> **Note for callers:** This is a computed property — each access allocates a new transcriber. `MeetingsCoordinator` reads it once during init and stores the result; do not call it inside hot loops or per-segment.
+
 - [ ] **Step 5: Run, expect pass**
 
 Run: `swift test --filter ElevenLabsBatch`
@@ -1738,7 +1741,7 @@ git commit -am "feat(meeting): MicCapture long-running mic-to-file"
 
 This is the highest-risk task. Uses the macOS 15 Core Audio Process Tap API: `AudioHardwareCreateProcessTap` with a `CATapDescription`, then `AudioHardwareCreateAggregateDevice` with the tap as a sub-device, then a regular `AVAudioEngine` reads from that aggregate.
 
-If the spike (which should run before this task) found Process Tap unworkable for our needs, switch to ScreenCaptureKit (`SCStream` with audio config) — same output shape, different setup. Both produce an `AVAudioPCMBuffer` stream that this class wraps.
+If the spike (which should run before this task) found Process Tap unworkable for our needs, **fall back to ScreenCaptureKit** (`SCStream` with `SCStreamConfiguration.capturesAudio = true`) — same TCC permission bucket on macOS 15+, well-documented, produces the same `AVAudioPCMBuffer` shape this class wraps. Spec §10.2 names ScreenCaptureKit as the explicit Plan B; if you switch, only this file changes — the orchestrator and writer don't care which API produced the buffers.
 
 **Files:**
 - Create: `Sources/Meeting/Capture/SystemAudioCapture.swift`
@@ -2233,7 +2236,7 @@ git commit -am "feat(meeting): MeetingOrchestrator lifecycle (start/stop/transcr
 
 - [ ] **Step 1: Read existing migration shape**
 
-Read `Sources/Core/ConfigMigration.swift` to understand the migration pattern.
+Read `Sources/Core/ConfigMigration.swift` to understand the migration pattern. The v0→v1 handler in that file is the canonical example — model the v1→v2 handler on it (same shape: read raw JSON, inject defaults for new fields, hand back to `JSONDecoder`).
 
 - [ ] **Step 2: Write failing tests**
 
@@ -2352,7 +2355,7 @@ final class MeetingsCoordinator {
 }
 ```
 
-This file will need a small follow-up in Task 19; the recorder URLs in the constructor above are placeholders. Step 1 just establishes the wiring shell.
+This file will need a small follow-up in Task 19; the recorder URLs in the constructor above are placeholders. Step 1 just establishes the wiring shell. **Do not exercise the orchestrator (no `start(...)` calls) until Task 19 lands** — the placeholder URLs would write to meaningless paths.
 
 - [ ] **Step 2: Add file to Xcode project**
 
@@ -2553,8 +2556,10 @@ menu.addItem(.separator())
 ```
 
 When recording is active, replace this entry with:
-- Title: "Stop recording (00:42)" — updated by a Timer in `MeetingsCoordinator`
+- Title: "Stop recording (00:42)" — updated by a `Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true)` stored on `MeetingsCoordinator`
 - Action: stop
+
+**Timer lifecycle:** start the timer when entering recording state, invalidate it in `stopMeeting()` (and in `deinit` as a defensive measure). Do not retain `self` strongly inside the timer's closure — use `[weak self]`. Without invalidation the timer keeps the coordinator alive and ticks indefinitely.
 
 - [ ] **Step 2: Implement menu actions in `MeetingsCoordinator`**
 
@@ -2619,8 +2624,11 @@ struct TranscriptView: View {
     @State var session: MeetingSession
     @State var transcript: MeetingTranscript
     @State var attendeesText: String
+    @State var audioStillExists: Bool
     let onAttendeesChanged: (AttendeeList) async -> MeetingTranscript
     let onRename: (Speaker, String) -> Void
+    let onDeleteTranscript: () -> Void
+    let onDeleteAudioNow: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -2629,6 +2637,23 @@ struct TranscriptView: View {
                     .textFieldStyle(.plain)
                     .font(.title2)
                 Spacer()
+                if audioStillExists {
+                    Button("Delete audio") {
+                        onDeleteAudioNow()
+                        audioStillExists = false
+                    }
+                    .help("Audio is currently retained on disk. Click to delete.")
+                } else {
+                    Text("Audio: deleted")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+                Button(role: .destructive) {
+                    onDeleteTranscript()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .help("Delete this transcript and all associated files")
             }
             .padding()
 
@@ -2698,19 +2723,27 @@ final class TranscriptWindow {
     private var window: NSWindow?
 
     func show(session: MeetingSession, transcript: MeetingTranscript, library: MeetingLibrary, mapper: any SpeakerNameMapper) {
+        let micExists = (try? FileManager.default.fileExists(atPath: library.micFile(for: session.id).path)) ?? false
         let view = TranscriptView(
             session: session,
             transcript: transcript,
             attendeesText: session.attendees.names.joined(separator: ", "),
+            audioStillExists: micExists,
             onAttendeesChanged: { newList in
-                // Re-run the mapper, save updated transcript.json/.md
                 let mapping = (try? await mapper.map(transcript: transcript, attendees: newList)) ?? [:]
                 var updated = transcript
                 updated.applySpeakerMapping(mapping)
                 try? library.writeTranscript(updated, for: session.id, title: session.title)
                 return updated
             },
-            onRename: { _, _ in }
+            onRename: { _, _ in },
+            onDeleteTranscript: { [weak self] in
+                try? library.delete(id: session.id)
+                self?.window?.close()
+            },
+            onDeleteAudioNow: {
+                try? library.deleteAudio(for: session.id)
+            }
         )
         let hosting = NSHostingController(rootView: view)
         let window = NSWindow(contentViewController: hosting)
@@ -2947,6 +2980,90 @@ git commit -am "docs: TECH_SPEC §13 + roadmap entry for meeting transcription"
 
 ---
 
+### Task 28a: Periodic flush of audio writers (crash-recovery foundation)
+
+Per spec §9, audio buffers must be flushed every ~10 s so that a crash mid-meeting leaves at most ~10 s of unwritten data. `AVAudioFile` flushes lazily; we explicitly close-and-reopen on a timer.
+
+**Files:**
+- Modify: `Sources/Meeting/Capture/MicCapture.swift`
+- Modify: `Sources/Meeting/Capture/SystemAudioCapture.swift`
+- Modify: `Sources/Meeting/Capture/OpusFileWriter.swift` — add `flush()` method
+
+- [ ] **Step 1: Add `flush()` to `OpusFileWriter`**
+
+```swift
+public func flush() throws {
+    // AVAudioFile does not expose an explicit flush. Closing the underlying
+    // file and reopening in append mode is unsafe; instead, the recorder
+    // tears down and reopens this writer on the flush cadence.
+}
+```
+
+(The actual flushing is achieved by the recorder closing this writer and creating a new one for a sequence-numbered file segment, then concatenating segments at stop time. This avoids touching `AVAudioFile`'s internals.)
+
+- [ ] **Step 2: Implement segmented writing in recorders**
+
+In `MicCapture` and `SystemAudioCapture`, change the writer field to write to `mic-000.opus`, `mic-001.opus`, … rotating every 10 s on a `DispatchSourceTimer`. On `stop()`, concatenate segments via `AVAssetExportSession` (or simple binary concat for PCM/CAF) into the final `mic.opus` / `system.opus`.
+
+Simpler alternative if `AVAssetExportSession` proves fiddly for our format: leave segments as-is and have the transcription pipeline accept either a single URL or a list of URLs (Scribe v2 doesn't natively merge — would need pre-upload concat). Choose based on what works.
+
+- [ ] **Step 3: Smoke test**
+
+Manual: start recording, kill the app process after 30 s (`kill -9`), verify segment files on disk are valid (e.g. `afinfo mic-000.opus` reports valid header + duration).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git commit -am "feat(meeting): segmented audio writers for crash recovery"
+```
+
+---
+
+### Task 28b: Launch-time recovery prompt for half-written meetings
+
+**Files:**
+- Modify: `Sources/Meeting/Persistence/MeetingLibrary.swift` — add `findIncomplete()`
+- Create: `Apps/WhatchuSayMac/WhatchuSayMac/Meeting/RecoveryPrompt.swift`
+- Modify: `Apps/WhatchuSayMac/WhatchuSayMac/Meeting/MeetingsCoordinator.swift` — call recovery on init
+
+- [ ] **Step 1: Add `findIncomplete()` to `MeetingLibrary`**
+
+```swift
+public func findIncomplete() throws -> [MeetingSession] {
+    try listAll().filter { session in
+        if case .recording = session.status { return true }
+        if case .transcribing = session.status { return true }
+        return false
+    }
+}
+```
+
+Add a test in `MeetingLibraryTests` that creates a session, leaves status at `.recording`, and verifies `findIncomplete()` returns it.
+
+- [ ] **Step 2: Implement `RecoveryPrompt`**
+
+Simple `NSAlert` per incomplete meeting with three buttons: "Try transcribing what we have", "Discard", "Decide later". The first calls `MeetingOrchestrator.recover(id:)` (a new method); the second deletes the meeting; the third leaves it on disk for the next launch.
+
+- [ ] **Step 3: Add `MeetingOrchestrator.recover(id:)`**
+
+Reuses the existing transcription pipeline: load the session, point at the (segment-concatenated or single) audio files, call `pipeline.run`, mark completed/failed identically to `stop()`.
+
+- [ ] **Step 4: Wire from `MeetingsCoordinator.init`**
+
+After construction, scan once via `library.findIncomplete()`. For each result, present `RecoveryPrompt`. Sheet attached to no parent window — these are launch-time alerts.
+
+- [ ] **Step 5: Smoke test**
+
+Manual: start a meeting, kill the app, relaunch. Verify the prompt appears for the incomplete session. Click "Try transcribing what we have" → verify a transcript is produced from the partial audio.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git commit -am "feat(meeting): launch-time recovery for half-written meetings"
+```
+
+---
+
 ### Task 29: End-to-end smoke + final verification
 
 - [ ] **Step 1: Run the full library test suite**
@@ -3002,5 +3119,10 @@ Per spec §13, none of the following are implemented in this plan:
 - Live transcript / live notes UI
 - Calendar OAuth integration
 - Voiceprint enrollment across meetings
+
+Additionally deferred from this plan (not in spec §13 but worth flagging):
+
+- **LLM-backed `SpeakerNameMapper`.** Spec §4.3 says the LLM mapping pass is "(optional)" and §10.4 makes accuracy a spike-validation target (≥ 70% on speakers addressed by name; below that, fall back to leaving anonymous). v1 ships `ContentBasedSpeakerNameMapper` (regex over self-introductions) which handles the common case; users can manually rename in the transcript view. Adding a real LLM-backed mapper requires introducing a chat-completion provider abstraction (the existing `STTCore` is STT-only — ElevenLabs has no chat completions endpoint), which is meaningful new dependency surface. Defer to a follow-up after §10.4 is measured against real recordings; if the gap is large, build the LLM mapper then.
+- **Past-meetings library window.** No UI for browsing prior transcripts after closing the transcript window in v1. Users can navigate to the storage path via the "Reveal in Finder" button on the Meetings settings pane and double-click `transcript.md`. A dedicated library window is a v1.5 polish item.
 
 Manual rename of speakers via context menu in `TranscriptView` is sketched in Task 22 step 1 but the rename sheet is left as a follow-up — the right-click context menu shows the action; the action invokes `transcript.renameSpeaker(...)` and re-saves. Acceptable v1.
