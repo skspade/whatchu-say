@@ -7,17 +7,15 @@ import PlatformApple
 struct WhatchuSayMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
-    /// SwiftUI's `App` requires a `Scene`. With `LSUIElement = YES` there's
-    /// no Settings menu item in an app menu (agent apps don't show one), so
-    /// the Settings scene is opened from the menubar dropdown via
-    /// `NSApp.sendAction(Selector(("showSettingsWindow:")), …)` —
-    /// see `AppDelegate.runOpenSettings`.
+    /// SwiftUI's `App` requires a `Scene`. The Settings scene satisfies that
+    /// requirement without creating a visible window on launch. The actual
+    /// settings window is managed by AppDelegate via NSHostingController
+    /// because agent apps (LSUIElement) can't use `showSettingsWindow:` on
+    /// modern macOS — the system requires SettingsLink / OpenSettingsAction,
+    /// neither of which is available from AppKit menu actions.
     var body: some Scene {
         Settings {
-            SettingsView(
-                store: appDelegate.configStore,
-                apiKeys: appDelegate.apiKeys
-            )
+            EmptyView()
         }
     }
 }
@@ -39,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let provider = "elevenlabs"
     private var coordinator: AppCoordinator?
     private var statusItemController: StatusItemController?
+    private var settingsWindow: NSWindow?
     private var currentKey: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -94,14 +93,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.permissionIssue = nil
     }
 
-    /// Open the SwiftUI Settings window. Agent apps (`LSUIElement = YES`)
-    /// stay in `.accessory` activation policy so the window can become key
-    /// without putting an icon in the Dock or app switcher. We bring the
-    /// app forward via `NSApp.activate(...)` so the window receives focus
-    /// and keyboard input; idempotent if the window is already open.
+    /// Open the settings window. Agent apps (`LSUIElement = YES`) can't use
+    /// SwiftUI's `showSettingsWindow:` selector on modern macOS (the system
+    /// requires `SettingsLink` / `OpenSettingsAction`, which aren't available
+    /// from AppKit menu actions). We host `SettingsView` in our own NSWindow
+    /// via NSHostingController instead.
     func runOpenSettings() {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        if let window = settingsWindow {
+            window.makeKeyAndOrderFront(nil)
+            NSRunningApplication.current.activate(options: .activateAllWindows)
+            return
+        }
+        let controller = NSHostingController(
+            rootView: SettingsView(store: configStore, apiKeys: apiKeys)
+        )
+        let window = NSWindow(contentViewController: controller)
+        window.title = "WhatchuSay Settings"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.center()
+        settingsWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSRunningApplication.current.activate(options: .activateAllWindows)
     }
 
     /// Build and install the menu-bar status item synchronously so the
