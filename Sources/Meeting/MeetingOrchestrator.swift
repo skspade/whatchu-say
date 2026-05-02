@@ -8,23 +8,27 @@ public actor MeetingOrchestrator {
         case transcribing(UUID)
     }
 
+    public typealias RecorderFactory = @Sendable (URL) -> any AudioRecorderProtocol
+
     private let library: any MeetingLibraryProtocol
-    private let micRecorder: any AudioRecorderProtocol
-    private let systemRecorder: any AudioRecorderProtocol
+    private let micRecorderFactory: RecorderFactory
+    private let systemRecorderFactory: RecorderFactory
     private let transcriber: any BatchTranscriber
     private let mapper: any SpeakerNameMapper
+    private var activeMicRecorder: (any AudioRecorderProtocol)?
+    private var activeSystemRecorder: (any AudioRecorderProtocol)?
     public private(set) var state: State = .idle
 
     public init(
         library: any MeetingLibraryProtocol,
-        micRecorder: any AudioRecorderProtocol,
-        systemRecorder: any AudioRecorderProtocol,
+        micRecorderFactory: @escaping RecorderFactory,
+        systemRecorderFactory: @escaping RecorderFactory,
         transcriber: any BatchTranscriber,
         mapper: any SpeakerNameMapper
     ) {
         self.library = library
-        self.micRecorder = micRecorder
-        self.systemRecorder = systemRecorder
+        self.micRecorderFactory = micRecorderFactory
+        self.systemRecorderFactory = systemRecorderFactory
         self.transcriber = transcriber
         self.mapper = mapper
     }
@@ -40,23 +44,32 @@ public actor MeetingOrchestrator {
         )
         _ = try library.create(session: session)
 
+        let micURL = try library.micFile(for: session.id)
+        let systemURL = try library.systemFile(for: session.id)
+        let mic = micRecorderFactory(micURL)
+        let system = systemRecorderFactory(systemURL)
+
         do {
-            try await micRecorder.start()
-            try await systemRecorder.start()
+            try await mic.start()
+            try await system.start()
         } catch {
-            await micRecorder.stop()
-            await systemRecorder.stop()
+            await mic.stop()
+            await system.stop()
             try? library.delete(id: session.id)
             throw error
         }
+        activeMicRecorder = mic
+        activeSystemRecorder = system
         state = .recording(session.id)
         return session.id
     }
 
     public func stop() async throws {
         guard case .recording(let id) = state else { return }
-        await micRecorder.stop()
-        await systemRecorder.stop()
+        await activeMicRecorder?.stop()
+        await activeSystemRecorder?.stop()
+        activeMicRecorder = nil
+        activeSystemRecorder = nil
         try await transcribe(id: id)
     }
 

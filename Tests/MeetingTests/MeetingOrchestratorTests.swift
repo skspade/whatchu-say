@@ -22,8 +22,8 @@ struct MeetingOrchestratorTests {
 
         let orch = MeetingOrchestrator(
             library: lib,
-            micRecorder: mic,
-            systemRecorder: system,
+            micRecorderFactory: { _ in mic },
+            systemRecorderFactory: { _ in system },
             transcriber: mock,
             mapper: ContentBasedSpeakerNameMapper()
         )
@@ -44,8 +44,8 @@ struct MeetingOrchestratorTests {
 
         let orch = MeetingOrchestrator(
             library: lib,
-            micRecorder: mic,
-            systemRecorder: system,
+            micRecorderFactory: { _ in mic },
+            systemRecorderFactory: { _ in system },
             transcriber: mock,
             mapper: ContentBasedSpeakerNameMapper()
         )
@@ -73,8 +73,8 @@ struct MeetingOrchestratorTests {
         let mock = MockBatchTranscriber()
         let orch = MeetingOrchestrator(
             library: lib,
-            micRecorder: MockAudioRecorder(),
-            systemRecorder: MockAudioRecorder(),
+            micRecorderFactory: { _ in MockAudioRecorder() },
+            systemRecorderFactory: { _ in MockAudioRecorder() },
             transcriber: mock,
             mapper: ContentBasedSpeakerNameMapper()
         )
@@ -97,8 +97,8 @@ struct MeetingOrchestratorTests {
         let mock = MockBatchTranscriber()
         let orch = MeetingOrchestrator(
             library: lib,
-            micRecorder: MockAudioRecorder(),
-            systemRecorder: MockAudioRecorder(),
+            micRecorderFactory: { _ in MockAudioRecorder() },
+            systemRecorderFactory: { _ in MockAudioRecorder() },
             transcriber: mock,
             mapper: ContentBasedSpeakerNameMapper()
         )
@@ -136,8 +136,8 @@ struct MeetingOrchestratorTests {
 
         let orch = MeetingOrchestrator(
             library: lib,
-            micRecorder: MockAudioRecorder(),
-            systemRecorder: MockAudioRecorder(),
+            micRecorderFactory: { _ in MockAudioRecorder() },
+            systemRecorderFactory: { _ in MockAudioRecorder() },
             transcriber: mock,
             mapper: ContentBasedSpeakerNameMapper()
         )
@@ -171,8 +171,8 @@ struct MeetingOrchestratorTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let orch = MeetingOrchestrator(
             library: lib,
-            micRecorder: MockAudioRecorder(),
-            systemRecorder: MockAudioRecorder(),
+            micRecorderFactory: { _ in MockAudioRecorder() },
+            systemRecorderFactory: { _ in MockAudioRecorder() },
             transcriber: MockBatchTranscriber(),
             mapper: ContentBasedSpeakerNameMapper()
         )
