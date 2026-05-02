@@ -32,7 +32,7 @@
 ## 2. User-visible behavior
 
 ### 2.1 Starting a recording
-1. User clicks **Start meeting recording** in the menu bar (or via overlay shortcut — TBD which shortcut, not part of this design).
+1. User clicks **Start meeting recording** in the menu bar. (A keyboard shortcut for this action is a deferred decision — see §13.)
 2. A modal appears with:
    - A reminder line: *"Recording without consent is illegal in some jurisdictions. Confirm participants are aware."*
    - An optional **Attendees** chip-input field (autocomplete from past meetings). User can type `Alice, Bob` or skip.
@@ -64,6 +64,7 @@
 ### 2.5 Settings → Meetings pane (new)
 - **Permission status:** Microphone, Screen & System Audio Recording. Each row links out to System Settings if not granted (mirroring existing fix-it deep-links).
 - **Default attendee list behavior:** "Show attendee field at start" (toggle, default on).
+- **Consent reminder:** "Show consent reminder before each recording" (toggle, default on). Toggling off corresponds to the opt-out described in §2.1; toggling back on restores the per-recording reminder.
 - **Audio retention:** "Delete recorded audio after transcription" (toggle, default on).
 - **Storage location:** path to local meeting library, with a "Reveal in Finder" button. No "sync to cloud" option — there is no cloud.
 
@@ -129,7 +130,9 @@ After transcription completes successfully, `mic.opus` and `system.opus` are del
   ```
 - `BatchTranscriptionResult` contains: `[Segment]` where `Segment = (start: TimeInterval, end: TimeInterval, speaker: String?, text: String)`.
 - ElevenLabs is the first provider implementing this. The realtime ElevenLabs provider used for dictation is unchanged.
-- API: `POST /v1/speech-to-text` with `model_id=scribe_v2`, `diarize=true|false`, `num_speakers` left unspecified (let Scribe auto-detect).
+- API: `POST /v1/speech-to-text` with `model_id=scribe_v2`. Two calls per meeting:
+  - `mic.opus`: `diarize=false`. Result segments all relabeled `me`.
+  - `system.opus`: `diarize=true`, `num_speakers` left unspecified (let Scribe auto-detect). Result segments retain `Speaker N` labels for downstream mapping.
 
 ### 4.2 Stream merge
 Two `[Segment]` lists arrive — one from mic (single speaker, all relabeled `me`), one from system (diarized, speakers `Speaker 1..N`). Merged by interleaving on `start` timestamp into a single chronological list.
@@ -145,7 +148,7 @@ Constraint: only map a speaker to an attendee when the transcript content provid
 ```
 - Provider: same provider abstraction as transcription (extends ElevenLabs first, but provider-agnostic).
 - Failed mappings stay as `Speaker N`. User can manually rename in the transcript view.
-- The mapping is stored in `meta.json` so re-rendering `transcript.md` is deterministic.
+- The mapping is stored in `meta.json` so re-rendering `transcript.md` is deterministic. Re-editing attendees in the transcript view (per §2.4) re-runs this pass and overwrites the stored mapping; manual renames performed via the right-click menu take precedence over LLM mappings and persist across re-runs.
 
 ---
 
@@ -187,7 +190,7 @@ Sources/
 
 - **Consent disclosure**: text in the Start modal, in the first-run privacy onboarding section, and in the Meetings settings pane. Identical wording across surfaces.
 - **No audio injection**: we do not play an "I am being recorded" announcement into the meeting. Out of scope; user-initiated.
-- **Retention default**: audio deleted after transcription completes. Transcript kept until user deletes.
+- **Retention default**: audio deleted after transcription completes. Transcript kept until user deletes. **Exception**: if transcription fails, audio is retained so the user can retry (see §9). The retention default applies once a transcript has been successfully produced.
 - **No telemetry**: we do not transmit metadata about meetings (count, duration, attendee names) to any service other than Scribe v2 / the LLM provider during the transcription itself. Audio is uploaded to ElevenLabs for transcription and per ElevenLabs's policy is not retained; we trust their stance for the same reason we already trust them for dictation. This is documented in the privacy pane.
 - **No cloud sync**: transcript library is local-only. (If the user wants iCloud Drive sync, they can put the storage path under `~/Library/Mobile Documents/...` themselves; we don't ship a UI for it in v1.)
 
@@ -233,7 +236,7 @@ The spike's job is to **validate** these design choices, not invent them. Specif
 3. **Scribe v2 batch cost** at our expected usage: the spike must produce a real number, not a guess. (Current ElevenLabs STT pricing is on their pricing page; spike pulls actual numbers and computes per-meeting cost.)
 4. **LLM name-mapping accuracy**: smoke-test the prompt against 5 real meeting transcripts with known attendees; aim for ≥ 70% correct mappings on speakers who are explicitly addressed by name at least once. Below that, simplify by leaving everything as `Speaker N` and skipping the mapping pass.
 5. **`AVAudioFile` Opus encoder availability**: confirm we can write Opus from `AVAudioFile` directly, or whether we need a separate encoder hop. Affects `OpusFileWriter` complexity.
-6. **Concurrent mic + Process Tap on the same `AVAudioEngine`**: confirm the engine handles two input nodes cleanly, or whether we need two engines.
+6. **Two-engine vs. one-engine for mic + Process Tap**: §3.3 assumes `MicCapture` runs its own `AVAudioEngine` separate from any engine used for Process Tap. Spike confirms this is the right shape (vs. attaching Process Tap as a second input node on a single engine), based on whichever is simpler and more robust under audio device changes.
 
 A throwaway proof-of-capture (per the spike's `Apps/Spike-MeetingCapture/`) demonstrates 1, 5, and 6 in a single ~100-line target.
 
@@ -255,3 +258,17 @@ The spike concludes with one of:
 - **NO** — fundamental blocker found in §10. Most likely blocker: Scribe v2 diarization quality on phone-band Zoom audio is unusable, in which case we either (a) accept Me/Them only and ship that, or (b) build the channel-trick + pyannote fallback, which is materially more work.
 
 **Current leaning: GO.** No structural blocker has surfaced in design.
+
+---
+
+## 13. Deferred decisions
+
+Decisions intentionally not made in this design, to be resolved during implementation or in a later iteration:
+
+- **Keyboard shortcut for Start meeting recording.** Whether to add a global hotkey (and which key combo) is left to the implementation phase to align with whatever shortcut conventions the rest of the menu bar surface settles on. Menu bar click is the v1 baseline.
+- **Per-process Process Tap (Zoom-only) vs. default-output tap.** v1 uses default-output (everything routed to speakers). v2 may move to per-process if user complaints about other-app audio bleed materialize.
+- **Detection-based trigger** (notification when Zoom is in a meeting). v2.
+- **Live transcript / live notes UI.** v2 polish.
+- **Calendar OAuth integration.** Indefinite — revisit only if user demand emerges. Manual attendee entry is the v1 path.
+- **Voiceprint enrollment across meetings** for cross-meeting speaker identity. Out of scope.
+
