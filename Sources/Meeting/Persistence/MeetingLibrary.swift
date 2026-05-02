@@ -10,6 +10,7 @@ public protocol MeetingLibraryProtocol: Sendable {
     func writeTranscript(_ transcript: MeetingTranscript, for id: UUID, title: String) throws
     func deleteAudio(for id: UUID) throws
     func listAll() throws -> [MeetingSession]
+    func findIncomplete() throws -> [MeetingSession]
     func delete(id: UUID) throws
 }
 
@@ -95,6 +96,15 @@ public struct MeetingLibrary: MeetingLibraryProtocol {
             result.append(session)
         }
         return result.sorted { $0.startedAt > $1.startedAt }
+    }
+
+    public func findIncomplete() throws -> [MeetingSession] {
+        try listAll().filter { session in
+            switch session.status {
+            case .recording, .transcribing: return true
+            case .completed, .failed: return false
+            }
+        }
     }
 
     public func delete(id: UUID) throws {

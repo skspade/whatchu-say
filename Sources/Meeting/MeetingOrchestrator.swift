@@ -57,9 +57,22 @@ public actor MeetingOrchestrator {
         guard case .recording(let id) = state else { return }
         await micRecorder.stop()
         await systemRecorder.stop()
+        try await transcribe(id: id)
+    }
 
+    /// Resume transcription for a session left half-written by a crash. The
+    /// session must already exist in the library; recorders are not started.
+    /// Used by the launch-time recovery flow.
+    public func recover(id: UUID) async throws {
+        guard case .idle = state else { throw MeetingError.alreadyRecording }
+        try await transcribe(id: id)
+    }
+
+    private func transcribe(id: UUID) async throws {
         var session = try library.load(id: id)
-        session.markStopped(at: Date())
+        if session.endedAt == nil {
+            session.markStopped(at: Date())
+        }
         try library.update(session: session)
         state = .transcribing(id)
 
