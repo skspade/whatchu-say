@@ -27,6 +27,9 @@ final class MeetingsCoordinator {
     var recordingMeetingID: UUID?
 
     init(apiKey: String, configStore: ConfigStore) throws {
+        guard #available(macOS 15, *) else {
+            throw MeetingError.captureSetupFailed("macOS 15+ required for meeting transcription")
+        }
         let library = try MeetingLibrary(rootDirectory: MeetingLibrary.defaultRoot())
         let provider = ElevenLabsProvider(apiKey: apiKey)
         guard let transcriber = provider.batchTranscriber else {
@@ -34,19 +37,14 @@ final class MeetingsCoordinator {
         }
         self.library = library
         self.configStore = configStore
-        if #available(macOS 15, *) {
-            self.orchestrator = MeetingOrchestrator(
-                library: library,
-                micRecorder: MicCapture(outputURL: library.rootDirectory.appendingPathComponent("placeholder-mic")),
-                systemRecorder: SystemAudioCapture(outputURL: library.rootDirectory.appendingPathComponent("placeholder-system")),
-                transcriber: transcriber,
-                mapper: ContentBasedSpeakerNameMapper()
-            )
-        } else {
-            throw MeetingError.captureSetupFailed("macOS 15+ required for meeting transcription")
-        }
+        self.orchestrator = MeetingOrchestrator(
+            library: library,
+            micRecorderFactory: { url in MicCapture(outputURL: url) },
+            systemRecorderFactory: { url in SystemAudioCapture(outputURL: url) },
+            transcriber: transcriber,
+            mapper: ContentBasedSpeakerNameMapper()
+        )
 
-        // Recover any half-written meetings from a prior session.
         Task { @MainActor in
             await self.runRecoveryPromptIfNeeded()
         }
@@ -135,8 +133,7 @@ final class MeetingsCoordinator {
         }
         guard !incomplete.isEmpty else { return }
         for session in incomplete {
-            let choice = RecoveryPrompt.present(for: session)
-            switch choice {
+            switch RecoveryPrompt.present(for: session) {
             case .recover:
                 do {
                     try await orchestrator.recover(id: session.id)
@@ -158,16 +155,5 @@ final class MeetingsCoordinator {
         alert.informativeText = String(describing: error)
         alert.alertStyle = .warning
         alert.runModal()
-    }
-}
-
-// `MeetingLibrary` does not expose its root directory publicly. We expose it
-// here as a tiny helper because the placeholder-URL construction in init is
-// thrown away once the recorder factory refactor lands.
-private extension MeetingLibrary {
-    var rootDirectory: URL {
-        // safe: `defaultRoot()` returns a real dir, and the only call site
-        // above passes its output directly to the init below.
-        get throws { try MeetingLibrary.defaultRoot() }
     }
 }

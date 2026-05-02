@@ -254,3 +254,38 @@ Explicitly deferred beyond v1:
 - Audio replay on reconnect (explicitly designed out).
 
 If any of these become important after v1, they get a fresh design pass and a new phase.
+
+---
+
+## Phase 4 — Meeting transcription (in progress)
+
+Cross-platform Swift complete (Tasks 1–17, 19, library half of 28b — 211 tests passing). Mac-app UI scaffolded but pending Xcode IDE integration. Pipeline:
+
+- Spike: [`docs/SPIKE_MEETING_TRANSCRIPTION.md`](./SPIKE_MEETING_TRANSCRIPTION.md)
+- Design: [`docs/superpowers/specs/2026-05-02-meeting-transcription-design.md`](./superpowers/specs/2026-05-02-meeting-transcription-design.md)
+- Plan: [`docs/superpowers/plans/2026-05-02-meeting-transcription.md`](./superpowers/plans/2026-05-02-meeting-transcription.md)
+
+### 4.1 Cross-platform Swift — done
+
+- ✅ `Sources/Meeting/` target: `Speaker`, `Segment`, `MeetingTranscript`, `AttendeeList`, `MeetingSession`
+- ✅ `MeetingLibrary` disk persistence + `findIncomplete()` for crash recovery
+- ✅ `BatchTranscriber` capability protocol in `STTCore`; `ElevenLabsBatchTranscriber` (Scribe v2) in `STTElevenLabs`
+- ✅ `TranscriptMerger`, `MeetingTranscriptionPipeline`, `ContentBasedSpeakerNameMapper`
+- ✅ `MeetingOrchestrator` with `start`/`stop`/`recover` lifecycle and recorder-factory injection
+- ✅ `MicCapture` and `SystemAudioCapture` (Core Audio Process Tap, macOS 15+)
+- ✅ `AppConfig` schema v2 with `MeetingsConfig` + migration handler
+
+### 4.2 Mac-app integration — pending Xcode IDE
+
+- ☐ Add `Apps/WhatchuSayMac/WhatchuSayMac/Meeting/` files to Xcode project
+- ☐ Add `Meeting` SwiftPM dependency to the Mac app target
+- ☐ Wire `MeetingsCoordinator` from `AppCoordinator`
+- ☐ Add Start/Stop meeting menu items to `StatusItemController`
+- ☐ Build via Xcode IDE, install via `make install`, smoke test with a real Zoom call
+
+### 4.3 Deferred
+
+- Periodic audio flush via segmented writers (Task 28a) — current crash window is bounded by `AVAudioFile`'s flush cadence
+- LLM-backed `SpeakerNameMapper` — content-based mapper handles the common case for v1
+- Past-meetings library window — users navigate via "Reveal in Finder" on the Meetings settings pane
+- Detection-based trigger, calendar OAuth, live captions, voiceprint enrollment — all per spec §13
