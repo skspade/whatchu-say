@@ -67,4 +67,92 @@ struct InjectorMacInjectTests {
         #expect(selector.resolve(text: "ok", frontmostBundleID: "com.apple.Terminal") == .paste)
     }
 }
+
+// MARK: - Paste timing tests
+
+/// Records the clipboard state at the moment the paste command fires.
+private final class PasteCommandSpy: @unchecked Sendable {
+    private(set) var clipboardAtPasteTime: String?
+    private(set) var callCount = 0
+
+    func record() {
+        clipboardAtPasteTime = NSPasteboard.general.string(forType: .string)
+        callCount += 1
+    }
+}
+
+@Suite("InjectorMac paste timing", .serialized)
+struct InjectorMacPasteTimingTests {
+    @Test("clipboard contains injected text at the moment paste command fires")
+    func clipboardCorrectAtPasteTime() async throws {
+        let spy = PasteCommandSpy()
+        let injector = InjectorMac(
+            restoreClipboard: false,
+            pasteCommand: spy.record
+        )
+
+        await MainActor.run {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString("old content", forType: .string)
+        }
+
+        try await injector.inject(text: "new transcription", hint: .forcePaste)
+
+        #expect(spy.callCount == 1)
+        #expect(spy.clipboardAtPasteTime == "new transcription")
+    }
+
+    @Test("pending restore from previous paste does not clobber current paste")
+    func restoreDoesNotClobberNextPaste() async throws {
+        let spy = PasteCommandSpy()
+        let injector = InjectorMac(
+            restoreClipboard: true,
+            restoreDelay: .zero,
+            pasteCommand: spy.record
+        )
+
+        await MainActor.run {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString("original", forType: .string)
+        }
+
+        try await injector.inject(text: "first", hint: .forcePaste)
+
+        // Let the zero-delay restore fire.
+        try await Task.sleep(for: .milliseconds(50))
+
+        try await injector.inject(text: "second", hint: .forcePaste)
+
+        #expect(spy.callCount == 2)
+        #expect(spy.clipboardAtPasteTime == "second")
+    }
+
+    @Test("clipboard is restored after restoreDelay when restoreClipboard is enabled")
+    func clipboardRestoredAfterDelay() async throws {
+        let spy = PasteCommandSpy()
+        let injector = InjectorMac(
+            restoreClipboard: true,
+            restoreDelay: .milliseconds(50),
+            pasteCommand: spy.record
+        )
+
+        await MainActor.run {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString("user clipboard", forType: .string)
+        }
+
+        try await injector.inject(text: "transcription", hint: .forcePaste)
+        #expect(spy.clipboardAtPasteTime == "transcription")
+
+        try await Task.sleep(for: .milliseconds(150))
+
+        let restored = await MainActor.run {
+            NSPasteboard.general.string(forType: .string)
+        }
+        #expect(restored == "user clipboard")
+    }
+}
 #endif

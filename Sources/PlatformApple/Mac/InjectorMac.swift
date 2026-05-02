@@ -29,17 +29,20 @@ public actor InjectorMac: Injector {
     private let restoreDelay: Duration
     private let typeInterval: Duration
     private var pendingRestore: Task<Void, Never>?
+    private let pasteCommand: @Sendable () throws -> Void
 
     public init(
         selector: StrategySelector = StrategySelector(),
         restoreClipboard: Bool = true,
         restoreDelay: Duration = .milliseconds(100),
-        typeInterval: Duration = .milliseconds(1)
+        typeInterval: Duration = .milliseconds(1),
+        pasteCommand: (@Sendable () throws -> Void)? = nil
     ) {
         self.selector = selector
         self.restoreClipboard = restoreClipboard
         self.restoreDelay = restoreDelay
         self.typeInterval = typeInterval
+        self.pasteCommand = pasteCommand ?? Self.postCmdV
     }
 
     public func inject(text: String, hint: InjectionHint) async throws {
@@ -122,8 +125,12 @@ public actor InjectorMac: Injector {
         pendingRestore?.cancel()
         pendingRestore = nil
 
-        let snapshot = await ClipboardSnapshot.replace(with: text)
-        try sendCmdV()
+        let command = pasteCommand
+        let snapshot = try await MainActor.run {
+            let snapshot = ClipboardSnapshot.replace(with: text)
+            try command()
+            return snapshot
+        }
 
         guard restoreClipboard else { return }
         let delay = restoreDelay
@@ -134,7 +141,7 @@ public actor InjectorMac: Injector {
         }
     }
 
-    private func sendCmdV() throws {
+    private nonisolated static func postCmdV() throws {
         guard let source = CGEventSource(stateID: .hidSystemState) else {
             throw InjectorMacError.eventSourceUnavailable
         }
