@@ -26,6 +26,10 @@ let package = Package(
             name: "WhatchuSayPlatformApple",
             targets: ["PlatformApple"]
         ),
+        .library(
+            name: "Meeting",
+            targets: ["Meeting"]
+        ),
     ],
     targets: [
         .target(

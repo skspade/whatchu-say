@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		371B0EB72FA1036B00338E4A /* WhatchuSayKit in Frameworks */ = {isa = PBXBuildFile; productRef = 371B0EB62FA1036B00338E4A /* WhatchuSayKit */; };
+		3762BAC32FA6A84700C1EE6D /* Meeting in Frameworks */ = {isa = PBXBuildFile; productRef = 3762BAC22FA6A84700C1EE6D /* Meeting */; };
 		37E651472F9FCCB800B6A81C /* WhatchuSayKit in Frameworks */ = {isa = PBXBuildFile; productRef = 37E651462F9FCCB800B6A81C /* WhatchuSayKit */; };
 		37E651492F9FCCB800B6A81C /* WhatchuSayPlatformApple in Frameworks */ = {isa = PBXBuildFile; productRef = 37E651482F9FCCB800B6A81C /* WhatchuSayPlatformApple */; };
 /* End PBXBuildFile section */
@@ -53,6 +54,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3762BAC32FA6A84700C1EE6D /* Meeting in Frameworks */,
 				37E651472F9FCCB800B6A81C /* WhatchuSayKit in Frameworks */,
 				37E651492F9FCCB800B6A81C /* WhatchuSayPlatformApple in Frameworks */,
 			);
@@ -133,6 +135,7 @@
 			packageProductDependencies = (
 				37E651462F9FCCB800B6A81C /* WhatchuSayKit */,
 				37E651482F9FCCB800B6A81C /* WhatchuSayPlatformApple */,
+				3762BAC22FA6A84700C1EE6D /* Meeting */,
 			);
 			productName = WhatchuSayMac;
 			productReference = 37E651372F9FCC7200B6A81C /* WhatchuSayMac.app */;
@@ -501,6 +504,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 37E651452F9FCCB800B6A81C /* XCLocalSwiftPackageReference "../../../whatchu-say" */;
 			productName = WhatchuSayKit;
+		};
+		3762BAC22FA6A84700C1EE6D /* Meeting */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 37E651452F9FCCB800B6A81C /* XCLocalSwiftPackageReference "../../../whatchu-say" */;
+			productName = Meeting;
 		};
 		37E651462F9FCCB800B6A81C /* WhatchuSayKit */ = {
 			isa = XCSwiftPackageProductDependency;

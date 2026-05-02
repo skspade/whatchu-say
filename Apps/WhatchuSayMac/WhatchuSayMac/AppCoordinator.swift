@@ -4,6 +4,7 @@ import Audio
 import Core
 import Hotkey
 import Injector
+import Meeting
 import Orchestrator
 import PlatformApple
 import STTCore
@@ -42,6 +43,7 @@ final class AppCoordinator {
     let state: AppState
     let recentTranscripts: RecentTranscriptsStore
     let errorLog: ErrorLogStore
+    let meetingsCoordinator: MeetingsCoordinator?
     private let orchestrator: Orchestrator
     private let hotkeySource: HotkeySourceMac
     private let audio: AVAudioCapture
@@ -107,6 +109,13 @@ final class AppCoordinator {
         }
         self.audioConfig = AudioConfigurationObserver { [orchestrator] in
             await orchestrator.handleAudioInterruption()
+        }
+
+        do {
+            self.meetingsCoordinator = try MeetingsCoordinator(apiKey: apiKey, configStore: configStore)
+        } catch {
+            self.meetingsCoordinator = nil
+            state.lastError = "Meeting transcription unavailable: \(error)"
         }
     }
 

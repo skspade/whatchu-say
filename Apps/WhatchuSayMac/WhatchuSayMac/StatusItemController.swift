@@ -35,6 +35,7 @@ final class StatusItemController: NSObject {
     private let recentTranscripts: RecentTranscriptsStore
     private let errorLog: ErrorLogStore
     private let handlers: Handlers
+    var meetingsCoordinator: MeetingsCoordinator?
 
     private var statusItem: NSStatusItem?
     private var workspaceWakeToken: NSObjectProtocol?
@@ -133,6 +134,10 @@ final class StatusItemController: NSObject {
 
         items.append(makeStatusHeaderItem())
         items.append(.separator())
+        if let mc = meetingsCoordinator {
+            items.append(contentsOf: makeMeetingSection(mc))
+            items.append(.separator())
+        }
         items.append(makeSetKeyItem())
         items.append(.separator())
         items.append(contentsOf: makeRecentTranscriptsSection())
@@ -334,6 +339,33 @@ final class StatusItemController: NSObject {
         let item = NSMenuItem(title: "Quit", action: #selector(handleQuit), keyEquivalent: "q")
         item.target = self
         return item
+    }
+
+    // MARK: - Meeting section
+
+    private func makeMeetingSection(_ mc: MeetingsCoordinator) -> [NSMenuItem] {
+        if mc.isRecording {
+            let elapsed = formatElapsed(mc.elapsedSeconds)
+            let stop = NSMenuItem(
+                title: "Stop recording (\(elapsed))",
+                action: #selector(MeetingsCoordinator.stopMeetingMenuAction(_:)),
+                keyEquivalent: ""
+            )
+            stop.target = mc
+            return [stop]
+        } else {
+            let start = NSMenuItem(
+                title: "Start meeting recording\u{2026}",
+                action: #selector(MeetingsCoordinator.startMeetingMenuAction(_:)),
+                keyEquivalent: ""
+            )
+            start.target = mc
+            return [start]
+        }
+    }
+
+    private func formatElapsed(_ seconds: Int) -> String {
+        String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 
     // MARK: - Section header / disabled-row helpers
