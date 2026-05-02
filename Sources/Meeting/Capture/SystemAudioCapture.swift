@@ -5,7 +5,7 @@ import AudioToolbox
 @preconcurrency import AVFoundation
 
 @available(macOS 15, *)
-public actor SystemAudioCapture {
+public actor SystemAudioCapture: AudioRecorderProtocol {
     private let outputURL: URL
     private var tapId: AudioObjectID = 0
     private var aggregateId: AudioObjectID = 0

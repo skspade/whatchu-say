@@ -3,7 +3,7 @@ import Foundation
 @preconcurrency import AVFoundation
 
 @available(macOS 15, *)
-public actor MicCapture {
+public actor MicCapture: AudioRecorderProtocol {
     private let outputURL: URL
     private var engine: AVAudioEngine?
     private var writer: OpusFileWriter?
