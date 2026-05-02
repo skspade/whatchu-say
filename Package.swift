@@ -26,6 +26,10 @@ let package = Package(
             name: "WhatchuSayPlatformApple",
             targets: ["PlatformApple"]
         ),
+        .library(
+            name: "Meeting",
+            targets: ["Meeting"]
+        ),
     ],
     targets: [
         .target(
@@ -78,6 +82,11 @@ let package = Package(
                 "Usage",
             ],
             path: "Sources/Orchestrator"
+        ),
+        .target(
+            name: "Meeting",
+            dependencies: ["Core", "STTCore"],
+            path: "Sources/Meeting"
         ),
         .target(
             name: "PlatformApple",
@@ -135,6 +144,11 @@ let package = Package(
             name: "UsageTests",
             dependencies: ["Usage"],
             path: "Tests/UsageTests"
+        ),
+        .testTarget(
+            name: "MeetingTests",
+            dependencies: ["Meeting", "STTCore", "STTMockProvider"],
+            path: "Tests/MeetingTests"
         ),
         .testTarget(
             name: "PlatformAppleTests",

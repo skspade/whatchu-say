@@ -1040,3 +1040,20 @@ Will dogfood (a) first — it's explicit, matches the "no implicit behavior" pre
 - **Type vs paste threshold**: 8 chars is a starting point; tune in dogfood.
 - **Cancel key default**: Esc. May add platform-specific defaults if conflicts surface.
 - **Linux UI toolchain (Phase 3)**: defer until Phase 3 starts.
+
+---
+
+## 20. Meeting transcription (Phase 4)
+
+Sibling subsystem to dictation. Captures mic + Mac system audio for the duration of a manually-started session, runs post-meeting batch transcription with diarization via ElevenLabs Scribe v2, and surfaces the result in a transcript window with manual attendee entry.
+
+Full design: [`docs/superpowers/specs/2026-05-02-meeting-transcription-design.md`](./superpowers/specs/2026-05-02-meeting-transcription-design.md). Implementation plan: [`docs/superpowers/plans/2026-05-02-meeting-transcription.md`](./superpowers/plans/2026-05-02-meeting-transcription.md).
+
+- **Capture API**: Core Audio Process Tap (`CATapDescription` + `AudioHardwareCreateProcessTap` + aggregate device), gated `@available(macOS 15, *)`. ScreenCaptureKit is the documented fallback.
+- **STT provider**: ElevenLabs Scribe v2 batch. `STTCore` exposes a new `BatchTranscriber` capability protocol; `STTElevenLabs` implements it. Realtime path used by dictation is unchanged.
+- **Pipeline**: mic → Scribe v2 (no diarization, relabeled `me`) ‖ system → Scribe v2 (diarized, `Speaker N`); merge by timestamp; content-based name mapping over user-entered attendees.
+- **Trigger**: pure-manual menu-bar action with consent reminder + optional attendee chip input. No detection, no calendar OAuth.
+- **Surface**: post-meeting transcript window (no live captions). Menu bar shows recording state with elapsed timer + Stop button.
+- **Privacy**: local-only library at `~/Library/Application Support/whatchu-say/meetings/<uuid>/`. Audio deleted after transcription by default; retained on failure for retry.
+- **Crash recovery**: `MeetingLibrary.findIncomplete()` + `RecoveryPrompt` at launch; `MeetingOrchestrator.recover(id:)` resumes transcription on a half-written session. Periodic audio-flush via segmented writers deferred.
+- **Architecture**: `Sources/Meeting/` SwiftPM target sibling to `Audio`/`Orchestrator`. Dictation `Orchestrator` and `AudioCapture` are untouched. `AppConfig` schema bumped to v2 with a new `MeetingsConfig`.

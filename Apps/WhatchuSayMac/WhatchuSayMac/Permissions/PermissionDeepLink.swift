@@ -14,17 +14,18 @@ import Foundation
 enum PermissionDeepLink: Sendable, Equatable {
     case accessibility
     case microphone
+    case screenAndSystemAudioRecording
 
     /// `x-apple.systempreferences:` URL for the relevant Privacy pane.
-    /// Opened via `NSWorkspace.shared.open(_:)`. The two pane anchors
-    /// (`Privacy_Accessibility`, `Privacy_Microphone`) are stable across
-    /// macOS versions back to 10.14.
+    /// Opened via `NSWorkspace.shared.open(_:)`.
     var settingsURL: URL {
         switch self {
         case .accessibility:
             return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
         case .microphone:
             return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
+        case .screenAndSystemAudioRecording:
+            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
         }
     }
 
@@ -35,6 +36,8 @@ enum PermissionDeepLink: Sendable, Equatable {
             return "Open Privacy & Security → Accessibility…"
         case .microphone:
             return "Open Privacy & Security → Microphone…"
+        case .screenAndSystemAudioRecording:
+            return "Open Privacy & Security → Screen & System Audio Recording…"
         }
     }
 
@@ -46,6 +49,8 @@ enum PermissionDeepLink: Sendable, Equatable {
             return "Accessibility access required for the dictation hotkey"
         case .microphone:
             return "Microphone access required to capture your voice"
+        case .screenAndSystemAudioRecording:
+            return "Screen & System Audio Recording access required to capture meeting audio"
         }
     }
 }

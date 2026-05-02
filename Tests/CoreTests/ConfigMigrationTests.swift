@@ -68,4 +68,32 @@ struct ConfigMigrationTests {
             }
         }
     }
+
+    @Test("v1 JSON migrates to v2 by injecting default meetings")
+    func migrateV1ToV2() throws {
+        // Hand-crafted v1 JSON: schemaVersion=1, no meetings field, all other
+        // sub-configs at their defaults. We round-trip a default AppConfig but
+        // strip both schemaVersion → 1 and the meetings field, so the migration
+        // path runs.
+        let defaultConfig = AppConfig()
+        var dict = try JSONSerialization.jsonObject(with: JSONEncoder().encode(defaultConfig)) as! [String: Any]
+        dict["schemaVersion"] = 1
+        dict.removeValue(forKey: "meetings")
+        let v1Data = try JSONSerialization.data(withJSONObject: dict)
+
+        let migrated = try ConfigMigration.migrate(v1Data)
+        #expect(migrated.schemaVersion == AppConfig.currentSchemaVersion)
+        #expect(migrated.meetings.showAttendeeFieldAtStart == true)
+        #expect(migrated.meetings.showConsentReminder == true)
+        #expect(migrated.meetings.deleteAudioAfterTranscription == true)
+    }
+
+    @Test("v2 JSON with explicit meetings preserved")
+    func v2Preserved() throws {
+        var config = AppConfig()
+        config.meetings.deleteAudioAfterTranscription = false
+        let data = try JSONEncoder().encode(config)
+        let migrated = try ConfigMigration.migrate(data)
+        #expect(migrated.meetings.deleteAudioAfterTranscription == false)
+    }
 }

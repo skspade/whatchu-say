@@ -3,6 +3,7 @@ import STTCore
 
 enum Endpoints {
     static let realtimeURL = URL(string: "wss://api.elevenlabs.io/v1/speech-to-text/realtime")!
+    static let batchSpeechToText = URL(string: "https://api.elevenlabs.io/v1/speech-to-text")!
     static let defaultModelId = "scribe_v2_realtime"
 
     /// Build the realtime STT WebSocket URL from a `SessionConfig`.

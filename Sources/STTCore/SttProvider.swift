@@ -36,3 +36,9 @@ public enum LanguageSupport: Sendable {
     case auto
     case multi
 }
+
+public extension SttProvider {
+    /// Providers that don't support batch transcription return `nil`. To
+    /// support it, override and return your `BatchTranscriber` instance.
+    var batchTranscriber: (any BatchTranscriber)? { nil }
+}

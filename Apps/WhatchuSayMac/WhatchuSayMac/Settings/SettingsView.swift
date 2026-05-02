@@ -25,6 +25,8 @@ struct SettingsView: View {
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
             PrivacyPane(store: store)
                 .tabItem { Label("Privacy", systemImage: "hand.raised") }
+            MeetingsPane(store: store)
+                .tabItem { Label("Meetings", systemImage: "person.3.sequence") }
         }
         .frame(minWidth: 520, minHeight: 360)
         .padding()

@@ -221,6 +221,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let existing = coordinator {
             await existing.shutdown()
             coordinator = nil
+            statusItemController?.meetingsCoordinator = nil
         }
         currentKey = apiKey
         let coord = AppCoordinator(
@@ -231,6 +232,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             errorLog: errorLog
         )
         coordinator = coord
+        statusItemController?.meetingsCoordinator = coord.meetingsCoordinator
         // Optimistically clear prior errors; AppCoordinator.start() will
         // overwrite to .startupFailed if hotkey tap install fails.
         state.lastError = nil
