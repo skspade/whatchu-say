@@ -2,6 +2,7 @@
 import Foundation
 import os
 @preconcurrency import CoreGraphics
+import Core
 import Hotkey
 
 /// CGEventTap-backed `HotkeySource`. Listens at `.cgSessionEventTap` for
@@ -50,11 +51,13 @@ public actor HotkeySourceMac: HotkeySource {
             continuation: continuation
         )
 
-        let mask = CGEventMask(
-            (1 << CGEventType.keyDown.rawValue) |
-            (1 << CGEventType.keyUp.rawValue) |
-            (1 << CGEventType.flagsChanged.rawValue)
-        )
+        let eventTypes: [CGEventType] = [
+            .keyDown, .keyUp, .flagsChanged,
+            .otherMouseDown, .otherMouseUp,
+        ]
+        let mask = eventTypes.reduce(CGEventMask(0)) { acc, type in
+            acc | (CGEventMask(1) << CGEventMask(type.rawValue))
+        }
 
         let refcon = Unmanaged.passUnretained(context).toOpaque()
         guard let tap = CGEvent.tapCreate(
@@ -191,8 +194,20 @@ private final class TapContext: @unchecked Sendable {
     /// Returns `true` when the C callback should swallow the underlying
     /// CGEvent.
     func handle(type: CGEventType, event: CGEvent) -> Bool {
-        let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
-        let autoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        let keyCode: CGKeyCode
+        let autoRepeat: Bool
+        switch type {
+        case .otherMouseDown, .otherMouseUp:
+            // Mouse-button activations are encoded into the same keyCode slot
+            // via `MouseButtonSentinel`, so the translator can match them with
+            // the same equality check it uses for keyboard codes.
+            let button = Int(event.getIntegerValueField(.mouseEventButtonNumber))
+            keyCode = CGKeyCode(MouseButtonSentinel.keyCode(forButton: button))
+            autoRepeat = false
+        default:
+            keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+            autoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        }
         let translated = translator.translate(
             type: type,
             keyCode: keyCode,

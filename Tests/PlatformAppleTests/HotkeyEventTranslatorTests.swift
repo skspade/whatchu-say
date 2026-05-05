@@ -4,6 +4,7 @@ import Foundation
 import CoreGraphics
 @testable import PlatformApple
 @testable import Hotkey
+import Core
 
 private let now = Date(timeIntervalSinceReferenceDate: 0)
 
@@ -148,6 +149,70 @@ struct MiscTranslatorTests {
             type: .flagsChanged,
             keyCode: 0x37, // left Cmd
             flags: CGEventFlags(rawValue: 0x100000),
+            autoRepeat: false,
+            now: now
+        )
+        #expect(event == nil)
+    }
+}
+
+@Suite("HotkeyEventTranslator: mouse-button activation")
+struct MouseButtonActivationTests {
+    /// Bind activation to Mouse 4 (NSEvent.buttonNumber == 3).
+    let translator = HotkeyEventTranslator(
+        activation: HotkeyBinding(
+            keyCode: CGKeyCode(MouseButtonSentinel.keyCode(forButton: 3)),
+            pressFlag: nil
+        ),
+        cancel: .escape
+    )
+
+    @Test("otherMouseDown for Mouse4 → keyDown")
+    func mouse4Down() {
+        let event = translator.translate(
+            type: .otherMouseDown,
+            keyCode: CGKeyCode(MouseButtonSentinel.keyCode(forButton: 3)),
+            flags: [],
+            autoRepeat: false,
+            now: now
+        )
+        #expect(event == .keyDown(at: now))
+    }
+
+    @Test("otherMouseUp for Mouse4 → keyUp")
+    func mouse4Up() {
+        let event = translator.translate(
+            type: .otherMouseUp,
+            keyCode: CGKeyCode(MouseButtonSentinel.keyCode(forButton: 3)),
+            flags: [],
+            autoRepeat: false,
+            now: now
+        )
+        #expect(event == .keyUp(at: now))
+    }
+
+    @Test("otherMouseDown for a different button is ignored")
+    func differentButtonIgnored() {
+        let event = translator.translate(
+            type: .otherMouseDown,
+            keyCode: CGKeyCode(MouseButtonSentinel.keyCode(forButton: 4)), // Mouse5
+            flags: [],
+            autoRepeat: false,
+            now: now
+        )
+        #expect(event == nil)
+    }
+
+    @Test("regular keyDown does not match the mouse-sentinel binding")
+    func keyDownDoesNotMatchSentinel() {
+        // A keyboard event surfaced with a sentinel-shaped keyCode should not
+        // arrive in practice (mac CGKeyCodes are ≤ 0x7F), but verify the
+        // translator's keyDown branch doesn't accidentally fire on a real
+        // keyboard press.
+        let event = translator.translate(
+            type: .keyDown,
+            keyCode: 0x00, // 'a'
+            flags: [],
             autoRepeat: false,
             now: now
         )

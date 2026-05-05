@@ -58,11 +58,19 @@ struct HotkeyRecorderField: View {
     private func startRecording() {
         guard !recording else { return }
         recording = true
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            handleKeyDown(event)
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .otherMouseDown]) { event in
+            switch event.type {
+            case .keyDown:
+                handleKeyDown(event)
+            case .otherMouseDown:
+                handleMouseDown(event)
+            default:
+                break
+            }
             // Returning nil swallows the event so the captured combo
             // doesn't leak through to the focused control (e.g. ⌘W
-            // closing the Settings window mid-record).
+            // closing the Settings window mid-record, or Mouse4 firing a
+            // browser back-navigation underneath the field).
             return nil
         }
     }
@@ -84,6 +92,16 @@ struct HotkeyRecorderField: View {
         let captured = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         keyCode = event.keyCode
         modifiers = KeyCombo.modifierSet(from: captured)
+        stopRecording()
+    }
+
+    /// Capture an extra mouse button (button 3+, e.g. Mouse4 / Mouse5) as
+    /// the binding. Modifiers are intentionally dropped — push-to-talk is
+    /// the use case, and combining a chord with a side-button click is
+    /// awkward enough that we skip it for simplicity.
+    private func handleMouseDown(_ event: NSEvent) {
+        keyCode = MouseButtonSentinel.keyCode(forButton: event.buttonNumber)
+        modifiers = []
         stopRecording()
     }
 

@@ -43,6 +43,25 @@ struct HotkeyEventTranslator: Sendable {
             }
             return nil
 
+        case .otherMouseDown:
+            // Mouse-button bindings encode the button number into `keyCode`
+            // via `MouseButtonSentinel` (see HotkeySourceMac.handle). Since
+            // sentinel codes (≥ 0xF000) can't collide with real keyboard
+            // CGKeyCodes (≤ 0x7F), the same equality test is sufficient.
+            if activation.pressFlag == nil, keyCode == activation.keyCode {
+                return .keyDown(at: now)
+            }
+            if cancel.pressFlag == nil, keyCode == cancel.keyCode {
+                return .cancelKey(at: now)
+            }
+            return nil
+
+        case .otherMouseUp:
+            if activation.pressFlag == nil, keyCode == activation.keyCode {
+                return .keyUp(at: now)
+            }
+            return nil
+
         case .flagsChanged:
             if let pressFlag = activation.pressFlag, keyCode == activation.keyCode {
                 return flags.contains(pressFlag)

@@ -45,6 +45,11 @@ enum KeyCombo {
     }
 
     private static func keyLabel(for keyCode: UInt16) -> String {
+        if let button = MouseButtonSentinel.button(fromKeyCode: keyCode) {
+            // Display 1-indexed so "Mouse 4" matches what hardware vendors
+            // print on side buttons (NSEvent.buttonNumber is 0-indexed).
+            return "Mouse \(button + 1)"
+        }
         if let label = labelTable[keyCode] {
             return label
         }
