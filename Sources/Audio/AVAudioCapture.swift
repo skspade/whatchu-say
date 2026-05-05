@@ -12,9 +12,11 @@ import AudioToolbox
 /// ## Pipeline
 /// 1. `installTap` on the input bus, `tapBufferSize` samples per callback in
 ///    the device-native format.
-/// 2. The tap callback runs on a serial CoreAudio dispatch queue. We convert
-///    synchronously to our target format using a long-lived `AVAudioConverter`
-///    (safe because the converter is only touched from this serial queue).
+/// 2. The tap callback runs on a serial CoreAudio dispatch queue. We average
+///    multichannel input down to mono Float32 ourselves (so 4-mic arrays like
+///    the PS Eye contribute every capsule), then convert to mono Int16 16 kHz
+///    via a long-lived `AVAudioConverter` (safe because the converter is only
+///    touched from this serial queue).
 /// 3. The converted samples are handed to the actor via a Task so chunking,
 ///    RMS computation, and stream-yielding don't block the audio thread.
 ///
@@ -114,19 +116,34 @@ public actor AVAudioCapture: AudioCapturing {
             throw AudioCaptureError.formatUnsupported
         }
 
-        guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+        // Multi-channel arrays (e.g. PS Eye 4-mic, USB interfaces) need every
+        // capsule mixed in — picking a single channel throws away signal and
+        // SNR. We pre-mix to mono Float32 ourselves so the converter only does
+        // sample-rate + Int16 conversion. Requires Float32 input, which is
+        // what AVAudioEngine produces on macOS.
+        guard inputFormat.commonFormat == .pcmFormatFloat32 else {
+            print("[AVAudioCapture] unsupported input commonFormat: \(inputFormat.commonFormat.rawValue)")
+            throw AudioCaptureError.formatUnsupported
+        }
+
+        guard let monoInputFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: inputFormat.sampleRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw AudioCaptureError.formatUnsupported
+        }
+
+        guard let converter = AVAudioConverter(from: monoInputFormat, to: outputFormat) else {
             throw AudioCaptureError.converterUnavailable
         }
 
-        // Multi-channel devices (USB webcams, audio interfaces) often carry the
-        // mic signal on channel 0 only. The default 4ch→1ch downmix averages
-        // all channels, diluting the signal with silence. Pin to channel 1
-        // (center mic on the PS Eye's 4-mic array).
-        if inputFormat.channelCount > outputFormat.channelCount {
-            converter.channelMap = [1]
-        }
-
-        let box = ConverterBox(converter: converter, outputFormat: outputFormat)
+        let box = ConverterBox(
+            converter: converter,
+            outputFormat: outputFormat,
+            monoInputFormat: monoInputFormat
+        )
         let captureRef = self
 
         chunker.reset()
@@ -139,7 +156,8 @@ public actor AVAudioCapture: AudioCapturing {
             bufferSize: Self.tapBufferSize,
             format: inputFormat
         ) { inputBuffer, _ in
-            guard let outputBuffer = Self.convert(inputBuffer: inputBuffer, using: box) else {
+            guard let monoBuffer = Self.downmixToMono(inputBuffer: inputBuffer, monoFormat: box.monoInputFormat),
+                  let outputBuffer = Self.convert(inputBuffer: monoBuffer, using: box) else {
                 let count = stats.recordFailure()
                 if count == 1 || count % 100 == 0 {
                     print("[AVAudioCapture] conversion FAILED (total: \(count), buffer format: \(inputBuffer.format))")
@@ -247,6 +265,53 @@ public actor AVAudioCapture: AudioCapturing {
         return outputBuffer
     }
 
+    /// Average all input channels into a single mono Float32 buffer at the
+    /// input sample rate. Mono passthrough is a memcpy. Multichannel arrays
+    /// (PS Eye 4-mic, USB interfaces) get every capsule mixed in — averaging
+    /// preserves peak headroom and reduces uncorrelated noise by √N.
+    private static func downmixToMono(
+        inputBuffer: AVAudioPCMBuffer,
+        monoFormat: AVAudioFormat
+    ) -> AVAudioPCMBuffer? {
+        let frameLength = Int(inputBuffer.frameLength)
+        guard frameLength > 0,
+              let inChannels = inputBuffer.floatChannelData,
+              let monoBuffer = AVAudioPCMBuffer(
+                  pcmFormat: monoFormat,
+                  frameCapacity: AVAudioFrameCount(frameLength)
+              ),
+              let outData = monoBuffer.floatChannelData?[0]
+        else { return nil }
+
+        monoBuffer.frameLength = AVAudioFrameCount(frameLength)
+        let channelCount = Int(inputBuffer.format.channelCount)
+
+        if channelCount == 1 {
+            memcpy(outData, inChannels[0], frameLength * MemoryLayout<Float>.size)
+        } else if inputBuffer.format.isInterleaved {
+            let inData = inChannels[0]
+            let scale: Float = 1.0 / Float(channelCount)
+            for frame in 0..<frameLength {
+                var sum: Float = 0
+                for ch in 0..<channelCount {
+                    sum += inData[frame * channelCount + ch]
+                }
+                outData[frame] = sum * scale
+            }
+        } else {
+            let scale: Float = 1.0 / Float(channelCount)
+            for frame in 0..<frameLength {
+                var sum: Float = 0
+                for ch in 0..<channelCount {
+                    sum += inChannels[ch][frame]
+                }
+                outData[frame] = sum * scale
+            }
+        }
+
+        return monoBuffer
+    }
+
     private static func extractInt16(from buffer: AVAudioPCMBuffer) -> [Int16] {
         let frameLength = Int(buffer.frameLength)
         guard frameLength > 0,
@@ -261,10 +326,12 @@ public actor AVAudioCapture: AudioCapturing {
 private final class ConverterBox: @unchecked Sendable {
     let converter: AVAudioConverter
     let outputFormat: AVAudioFormat
+    let monoInputFormat: AVAudioFormat
 
-    init(converter: AVAudioConverter, outputFormat: AVAudioFormat) {
+    init(converter: AVAudioConverter, outputFormat: AVAudioFormat, monoInputFormat: AVAudioFormat) {
         self.converter = converter
         self.outputFormat = outputFormat
+        self.monoInputFormat = monoInputFormat
     }
 }
 
