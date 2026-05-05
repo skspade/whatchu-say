@@ -1,6 +1,9 @@
 #if canImport(AVFoundation)
 import Foundation
 @preconcurrency import AVFoundation
+#if os(macOS)
+import AudioToolbox
+#endif
 
 /// AVAudioEngine-backed `AudioCapturing`. Captures from the default input,
 /// converts to 16 kHz mono Int16, re-chunks into 20 ms (320-sample) frames,
@@ -65,8 +68,42 @@ public actor AVAudioCapture: AudioCapturing {
 
         let engine = AVAudioEngine()
         let input = engine.inputNode
+
+        #if os(macOS)
+        // AVAudioEngine may create an aggregate device (CADefaultDeviceAggregate)
+        // that combines input + output, producing extra channels and I/O issues.
+        // Explicitly pin the input node to the system default input device.
+        if let audioUnit = input.audioUnit {
+            var defaultDevice = Self.systemDefaultInputDevice()
+            if defaultDevice != kAudioObjectUnknown {
+                let setStatus = AudioUnitSetProperty(
+                    audioUnit,
+                    kAudioOutputUnitProperty_CurrentDevice,
+                    kAudioUnitScope_Global,
+                    0,
+                    &defaultDevice,
+                    UInt32(MemoryLayout<AudioDeviceID>.size)
+                )
+                if setStatus != noErr {
+                    print("[AVAudioCapture] failed to set input device (status \(setStatus))")
+                }
+            }
+        }
+        #endif
+
         let inputFormat = input.inputFormat(forBus: 0)
         print("[AVAudioCapture] input format: \(inputFormat)")
+
+        #if os(macOS)
+        if let audioUnit = input.audioUnit {
+            print("[AVAudioCapture] input device: \(Self.inputDeviceName(from: audioUnit) ?? "unknown")")
+        }
+        #endif
+
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            print("[AVAudioCapture] invalid input format: sampleRate=\(inputFormat.sampleRate) channels=\(inputFormat.channelCount)")
+            throw AudioCaptureError.formatUnsupported
+        }
 
         guard let outputFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
@@ -81,6 +118,14 @@ public actor AVAudioCapture: AudioCapturing {
             throw AudioCaptureError.converterUnavailable
         }
 
+        // Multi-channel devices (USB webcams, audio interfaces) often carry the
+        // mic signal on channel 0 only. The default 4ch→1ch downmix averages
+        // all channels, diluting the signal with silence. Pin to channel 1
+        // (center mic on the PS Eye's 4-mic array).
+        if inputFormat.channelCount > outputFormat.channelCount {
+            converter.channelMap = [1]
+        }
+
         let box = ConverterBox(converter: converter, outputFormat: outputFormat)
         let captureRef = self
 
@@ -88,12 +133,17 @@ public actor AVAudioCapture: AudioCapturing {
         startedAt = .now
 
         let counter = inFlightIngest
+        let stats = ConversionStats()
         input.installTap(
             onBus: 0,
             bufferSize: Self.tapBufferSize,
             format: inputFormat
         ) { inputBuffer, _ in
             guard let outputBuffer = Self.convert(inputBuffer: inputBuffer, using: box) else {
+                let count = stats.recordFailure()
+                if count == 1 || count % 100 == 0 {
+                    print("[AVAudioCapture] conversion FAILED (total: \(count), buffer format: \(inputBuffer.format))")
+                }
                 return
             }
             let samples = Self.extractInt16(from: outputBuffer)
@@ -248,4 +298,61 @@ final class InFlightCounter: @unchecked Sendable {
         return count
     }
 }
+
+private final class ConversionStats: @unchecked Sendable {
+    private let lock = NSLock()
+    private var failures = 0
+
+    func recordFailure() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        failures += 1
+        return failures
+    }
+}
+
+#if os(macOS)
+extension AVAudioCapture {
+    fileprivate static func inputDeviceName(from audioUnit: AudioUnit) -> String? {
+        var deviceID: AudioDeviceID = 0
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioUnitGetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &deviceID,
+            &size
+        )
+        guard status == noErr, deviceID != 0 else { return nil }
+
+        var name: CFString = "" as CFString
+        var nameSize = UInt32(MemoryLayout<CFString>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let nameStatus = AudioObjectGetPropertyData(
+            deviceID, &address, 0, nil, &nameSize, &name
+        )
+        guard nameStatus == noErr else { return nil }
+        return name as String
+    }
+
+    fileprivate static func systemDefaultInputDevice() -> AudioDeviceID {
+        var deviceID: AudioDeviceID = kAudioObjectUnknown
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address, 0, nil, &size, &deviceID
+        )
+        return deviceID
+    }
+}
+#endif
 #endif
