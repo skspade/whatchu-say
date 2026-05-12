@@ -244,12 +244,18 @@ actor RecordingSession: SttSession {
     /// mid-flight. With the fix in place the orchestrator drains first, so
     /// the yields no longer lose frames — but they keep the test honest by
     /// preventing a spuriously-fast pushAudio path from hiding regressions.
+    ///
+    /// Also yields a `.partial` event whenever pre-EOS audio is recorded,
+    /// mirroring the real provider: ElevenLabs replies to streamed audio
+    /// with `partial_transcript` messages. Without this, the orchestrator's
+    /// silence fast-path would short-circuit finalize before EOS.
     func pushAudio(_ samples: [Int16]) async throws {
         for _ in 0..<4 { await Task.yield() }
         if endOfStreamSeen {
             framesAfterEOS.append(samples)
         } else {
             framesBeforeEOS.append(samples)
+            continuation.yield(.partial(text: "stub", stability: 0.5))
         }
     }
 
@@ -393,6 +399,15 @@ actor DelayedCloseSession: SttSession {
         committedText = text
     }
 
+    /// Yield a partial transcript. Tests use this to mark the session as
+    /// "server heard speech," matching the real provider's behaviour: a
+    /// session that produces a committed transcript always has at least one
+    /// preceding `partial_transcript`. Without it, the orchestrator's
+    /// silence fast-path would tear the session down before EOS.
+    nonisolated func yieldPartial(_ text: String = "stub") {
+        continuation.yield(.partial(text: text, stability: 0.5))
+    }
+
     func pushAudio(_ samples: [Int16]) async throws {}
 
     func endOfStream() async throws {
@@ -406,6 +421,60 @@ actor DelayedCloseSession: SttSession {
     }
 
     nonisolated func finishStream() {
+        continuation.finish()
+    }
+}
+
+// MARK: - SilentProvider / SilentSession
+
+/// Provider whose sessions never emit any `.partial` or `.final`. `endOfStream`
+/// is accepted (and recorded) but yields nothing; the events stream stays open
+/// until `close()`. Models ElevenLabs' "no audio activity" path, where the
+/// server eventually sends `insufficient_audio_activity` ~10 s after an empty
+/// commit — long enough to wedge the orchestrator if it waits on EOS.
+actor SilentProvider: SttProvider {
+    nonisolated let name = "silent"
+    nonisolated let capabilities = Capabilities(
+        partials: true,
+        punctuation: true,
+        languages: .auto,
+        sampleRates: [16_000],
+        maxSessionSeconds: nil,
+        supportsClientEndpointing: true
+    )
+
+    private(set) var sessions: [SilentSession] = []
+
+    func open(config: SessionConfig) async throws -> any SttSession {
+        let session = SilentSession()
+        sessions.append(session)
+        return session
+    }
+
+    var lastSession: SilentSession? { sessions.last }
+}
+
+actor SilentSession: SttSession {
+    nonisolated let events: AsyncStream<SttEvent>
+    private nonisolated let continuation: AsyncStream<SttEvent>.Continuation
+    private(set) var endOfStreamCount: Int = 0
+    private var closed = false
+
+    init() {
+        let (stream, cont) = AsyncStream<SttEvent>.makeStream()
+        self.events = stream
+        self.continuation = cont
+    }
+
+    func pushAudio(_ samples: [Int16]) async throws {}
+
+    func endOfStream() async throws {
+        endOfStreamCount += 1
+    }
+
+    func close() async {
+        guard !closed else { return }
+        closed = true
         continuation.finish()
     }
 }

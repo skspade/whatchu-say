@@ -68,6 +68,12 @@ public actor Orchestrator {
     /// `awaitFinal()` return immediately without waiting for the events
     /// stream to finish (WebSocket close), which can be delayed.
     private var postCommitFinalReceived: Bool = false
+    /// Set when any `.partial` event arrives on the current session. Used by
+    /// `finalizeAndInject` to short-circuit when the server never recognized
+    /// any speech: in that case sending EOS would just stall awaiting an
+    /// `insufficient_audio_activity` error (~10 s on ElevenLabs), so we tear
+    /// the session down immediately instead. Cleared on session swap.
+    private var partialsReceived: Bool = false
     /// True from the first line of `finalizeAndInject` until it returns. Lets
     /// `handleSessionStreamEnded` distinguish "expected close after EOS"
     /// (defer to finalize) from "unexpected teardown" (run interrupt+reset).
@@ -208,6 +214,27 @@ public actor Orchestrator {
             return
         }
 
+        // Fast path: the server emitted neither a `partial_transcript` nor
+        // a `committed_transcript`, so it never recognized any speech.
+        // Sending EOS here would block `awaitFinal` until the server's
+        // `insufficient_audio_activity` error arrives, which ElevenLabs
+        // takes ~10 s to emit. Skip EOS and tear down immediately so the
+        // next hotkey press isn't gated on that wait. `accumulatedFinal`
+        // covers the multi-segment auto-VAD case where a pause-segment
+        // commit arrived without any preceding partial — still worth
+        // sending EOS to flush.
+        if !partialsReceived && accumulatedFinal.isEmpty {
+            print("[Orchestrator] finalizeAndInject: no server activity, skipping EOS")
+            await closeCurrentSession()
+            if let started = sessionStartedAt {
+                let durationMs = UInt64(max(0, Date().timeIntervalSince(started)) * 1000)
+                await usage.recordSession(durationMs: durationMs, provider: provider.name)
+            }
+            sessionStartedAt = nil
+            eventsContinuation.yield(.sessionEnded(injectedText: nil))
+            return
+        }
+
         try? await session.endOfStream()
         if currentSession == nil {
             print("[Orchestrator] finalizeAndInject: session gone after EOS, bailing")
@@ -340,6 +367,7 @@ public actor Orchestrator {
         accumulatedFinal = ""
         eventsStreamFinished = false
         postCommitFinalReceived = false
+        partialsReceived = false
         if let waiter = finalizationWaiter {
             finalizationWaiter = nil
             waiter.resume()
@@ -392,6 +420,7 @@ public actor Orchestrator {
     private func handleSessionEvent(_ event: SttEvent) {
         switch event {
         case .partial(let text, _):
+            partialsReceived = true
             eventsContinuation.yield(.partial(text: text))
         case .final(let text, _):
             guard !text.isEmpty else { return }
