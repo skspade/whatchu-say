@@ -1,4 +1,6 @@
 import Foundation
+import os
+import Core
 import STTCore
 
 /// One ElevenLabs realtime STT session backed by a single
@@ -25,13 +27,18 @@ public actor ElevenLabsSession: SttSession {
     public nonisolated let events: AsyncStream<SttEvent>
     private nonisolated let eventsContinuation: AsyncStream<SttEvent>.Continuation
 
+    private static let log = AppLogger.logger(for: .stt)
+
     private let task: URLSessionWebSocketTask
     private let sampleRate: Int
     private var receiveTask: Task<Void, Never>?
     private var closed = false
-    /// Set after `endOfStream()` sends the commit. Once true, a subsequent
-    /// `receive()` failure is the server's expected post-EOS WebSocket close,
-    /// not an error worth surfacing to the user.
+    /// Set when `endOfStream()` is INVOKED (before `send` runs). Once true,
+    /// a subsequent `receive()` failure is treated as the expected post-EOS
+    /// WebSocket close — including the case where the send itself failed
+    /// because the WS was already half-dead, since the orchestrator's
+    /// finalize-timeout will recover the in-flight transcript and we don't
+    /// want a noisy "websocket error" surfaced on top.
     private var commitSent = false
 
     init(
@@ -53,33 +60,33 @@ public actor ElevenLabsSession: SttSession {
     /// Resume the WebSocket and wait for the server's `session_started`
     /// handshake before returning. Any failure here aborts session creation.
     func start() async throws {
-        print("[ElevenLabs] connecting to \(task.originalRequest?.url?.absoluteString ?? "<no url>")")
+        Self.log.debug("connecting to \(self.task.originalRequest?.url?.absoluteString ?? "<no url>", privacy: .public)")
         task.resume()
 
         let first: ServerMessage
         do {
             first = try await receiveOne()
         } catch let error as SttError {
-            print("[ElevenLabs] handshake failed (SttError): \(error)")
+            Self.log.error("handshake failed (SttError): \(String(describing: error), privacy: .public)")
             await tearDown()
             throw error
         } catch {
             let ns = error as NSError
-            print("[ElevenLabs] handshake failed: domain=\(ns.domain) code=\(ns.code) desc=\(ns.localizedDescription)")
+            Self.log.error("handshake failed: domain=\(ns.domain, privacy: .public) code=\(ns.code) desc=\(ns.localizedDescription, privacy: .public)")
             await tearDown()
             throw Self.mapNetworkError(error)
         }
 
         switch first {
         case .sessionStarted:
-            print("[ElevenLabs] session_started received")
+            Self.log.debug("session_started received")
             startReceiveLoop()
         case .error(let kind, let message):
-            print("[ElevenLabs] server error on connect: \(kind): \(message)")
+            Self.log.error("server error on connect: \(kind, privacy: .public): \(message, privacy: .public)")
             await tearDown()
             throw kind == "auth_error" ? SttError.authentication : SttError.fatal("\(kind): \(message)")
         case .partialTranscript, .committedTranscript, .unknown:
-            print("[ElevenLabs] unexpected first message: \(first)")
+            Self.log.error("unexpected first message: \(String(describing: first), privacy: .public)")
             await tearDown()
             throw SttError.fatal("unexpected first message from server")
         }
@@ -107,8 +114,10 @@ public actor ElevenLabsSession: SttSession {
             commit: true,
             previousText: nil
         )
-        try await send(chunk)
+        // Mark BEFORE the send so a failing send (WS already dead) still
+        // quiets the recv loop's error branch — see `commitSent` doc.
         commitSent = true
+        try await send(chunk)
     }
 
     public func close() async {
@@ -165,11 +174,12 @@ public actor ElevenLabsSession: SttSession {
         } catch {
             if commitSent {
                 // Expected: server closes the WebSocket after responding to
-                // the EOS commit. Tear down quietly so the orchestrator's
-                // finalize path doesn't surface a spurious "error" toast.
-                print("[ElevenLabs] websocket closed after EOS commit")
+                // the EOS commit (or the WS was already half-dead when we
+                // sent EOS). Tear down quietly — the orchestrator's
+                // finalize timeout handles the missing-commit case.
+                Self.log.debug("websocket closed after EOS commit")
             } else {
-                print("[ElevenLabs] websocket recv error: \(error.localizedDescription)")
+                Self.log.error("websocket recv error: \(error.localizedDescription, privacy: .public)")
                 eventsContinuation.yield(.warning("websocket error: \(error.localizedDescription)"))
             }
             await tearDown()
@@ -179,20 +189,20 @@ public actor ElevenLabsSession: SttSession {
         case .sessionStarted:
             return true
         case .partialTranscript(let text):
-            print("[ElevenLabs] partial: \(text)")
+            Self.log.debug("partial (\(text.count) chars)")
             eventsContinuation.yield(.partial(text: text, stability: 0.8))
             return true
         case .committedTranscript(let text):
-            print("[ElevenLabs] committed: \(text)")
+            Self.log.debug("committed (\(text.count) chars)")
             eventsContinuation.yield(.final(text: text, alternatives: []))
             return true
         case .error(let kind, let message):
-            print("[ElevenLabs] server error: \(kind): \(message)")
+            Self.log.error("server error: \(kind, privacy: .public): \(message, privacy: .public)")
             eventsContinuation.yield(.warning("\(kind): \(message)"))
             await tearDown()
             return false
         case .unknown(let messageType):
-            print("[ElevenLabs] unknown message_type: \(messageType)")
+            Self.log.warning("unknown message_type: \(messageType, privacy: .public)")
             eventsContinuation.yield(.warning("unknown message_type: \(messageType)"))
             return true
         }

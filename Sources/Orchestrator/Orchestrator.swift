@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Core
 import Audio
 import STTCore
@@ -28,6 +29,8 @@ public actor Orchestrator {
     public nonisolated let events: AsyncStream<OrchestratorEvent>
     private nonisolated let eventsContinuation: AsyncStream<OrchestratorEvent>.Continuation
 
+    private static let log = AppLogger.logger(for: .orchestrator)
+
     private let provider: any SttProvider
     private let injector: any Injector
     private let stateMachine: ActivationStateMachine
@@ -35,6 +38,14 @@ public actor Orchestrator {
     private let audioCapture: any AudioCapturing
     private let timerScheduler: any TimerScheduler
     private let sessionConfig: SessionConfig
+    /// Hard cap on how long `awaitFinal()` will block after EOS waiting for
+    /// the server's committed transcript. The real provider occasionally
+    /// drops the WebSocket without sending a close frame, in which case the
+    /// OS TCP layer can take 10–15 s to surface the failure. Bounding the
+    /// wait here keeps the HUD responsive; on timeout we inject whatever
+    /// text we've already received (committed segments + the last
+    /// in-progress partial) rather than dropping the transcription.
+    private let finalizeTimeout: Duration
 
     private var currentSession: (any SttSession)?
     private var currentMode: ActivationMode = .pressHold
@@ -74,6 +85,13 @@ public actor Orchestrator {
     /// `insufficient_audio_activity` error (~10 s on ElevenLabs), so we tear
     /// the session down immediately instead. Cleared on session swap.
     private var partialsReceived: Bool = false
+    /// Text of the most recent `.partial` event on the current session.
+    /// Overwritten on each new partial; cleared when a `.final` consumes
+    /// the in-progress segment, and on session swap. Used as the fallback
+    /// commit text when `awaitFinal()` times out before the server sends
+    /// a `committed_transcript` — the user saw this text in the HUD and
+    /// expects it to be pasted.
+    private var currentPartial: String = ""
     /// True from the first line of `finalizeAndInject` until it returns. Lets
     /// `handleSessionStreamEnded` distinguish "expected close after EOS"
     /// (defer to finalize) from "unexpected teardown" (run interrupt+reset).
@@ -91,7 +109,8 @@ public actor Orchestrator {
         usage: UsageTracker,
         audioCapture: any AudioCapturing,
         timerScheduler: any TimerScheduler = TaskTimerScheduler(),
-        sessionConfig: SessionConfig = SessionConfig()
+        sessionConfig: SessionConfig = SessionConfig(),
+        finalizeTimeout: Duration = .seconds(3)
     ) {
         self.provider = provider
         self.injector = injector
@@ -100,6 +119,7 @@ public actor Orchestrator {
         self.audioCapture = audioCapture
         self.timerScheduler = timerScheduler
         self.sessionConfig = sessionConfig
+        self.finalizeTimeout = finalizeTimeout
         let (stream, continuation) = AsyncStream<OrchestratorEvent>.makeStream()
         self.events = stream
         self.eventsContinuation = continuation
@@ -109,7 +129,7 @@ public actor Orchestrator {
     /// output (synchronously from the caller's perspective — when this returns,
     /// session changes, finalization, and injection are all complete).
     public func handle(hotkeyEvent: HotkeyEvent) async {
-        print("[Orchestrator] handle(hotkeyEvent: \(hotkeyEvent))")
+        Self.log.debug("handle hotkeyEvent: \(String(describing: hotkeyEvent), privacy: .public)")
         let outputs = await stateMachine.handle(hotkeyEvent)
         for output in outputs {
             await apply(output)
@@ -130,7 +150,7 @@ public actor Orchestrator {
     // MARK: - Output dispatch
 
     private func apply(_ output: HotkeyOutput) async {
-        print("[Orchestrator] apply: \(output)")
+        Self.log.debug("apply \(String(describing: output), privacy: .public)")
         switch output {
         case .startDictation(let mode):
             await startDictation(mode: mode)
@@ -183,21 +203,21 @@ public actor Orchestrator {
         } catch {
             // TODO(1.4): surface as a toast and reset the FSM. Logging until
             // we have UI to display this.
-            print("[Orchestrator] provider.open failed: \(error)")
+            Self.log.error("provider.open failed: \(error.localizedDescription, privacy: .public)")
             eventsContinuation.yield(.error(text: "Failed to open session: \(error.localizedDescription)"))
         }
     }
 
     private func finalizeAndInject() async {
         guard let session = currentSession else {
-            print("[Orchestrator] finalizeAndInject: no current session, bailing")
+            Self.log.debug("finalizeAndInject: no current session, bailing")
             return
         }
-        print("[Orchestrator] finalizeAndInject: ENTER (epoch=\(sessionEpoch))")
+        Self.log.debug("finalizeAndInject ENTER (epoch=\(self.sessionEpoch))")
         finalizing = true
         defer {
             finalizing = false
-            print("[Orchestrator] finalizeAndInject: EXIT")
+            Self.log.debug("finalizeAndInject EXIT")
         }
 
         // Stop audio capture and wait for the forwarder to drain every
@@ -210,7 +230,7 @@ public actor Orchestrator {
         // already emitted `.sessionEnded(nil)` and reset the FSM. Bail out
         // quietly to avoid a duplicate `.sessionEnded` and a doomed `awaitFinal`.
         if currentSession == nil {
-            print("[Orchestrator] finalizeAndInject: session gone after drain, bailing")
+            Self.log.debug("finalizeAndInject: session gone after drain, bailing")
             return
         }
 
@@ -224,7 +244,7 @@ public actor Orchestrator {
         // commit arrived without any preceding partial — still worth
         // sending EOS to flush.
         if !partialsReceived && accumulatedFinal.isEmpty {
-            print("[Orchestrator] finalizeAndInject: no server activity, skipping EOS")
+            Self.log.debug("finalizeAndInject: no server activity, skipping EOS")
             await closeCurrentSession()
             if let started = sessionStartedAt {
                 let durationMs = UInt64(max(0, Date().timeIntervalSince(started)) * 1000)
@@ -237,15 +257,15 @@ public actor Orchestrator {
 
         try? await session.endOfStream()
         if currentSession == nil {
-            print("[Orchestrator] finalizeAndInject: session gone after EOS, bailing")
+            Self.log.debug("finalizeAndInject: session gone after EOS, bailing")
             return
         }
         eventsContinuation.yield(.finalizing)
 
         let finalText = await awaitFinal()
-        print("[Orchestrator] finalizeAndInject: awaitFinal returned \(finalText == nil ? "nil" : "'\(finalText!)'")")
+        Self.log.debug("finalizeAndInject: awaitFinal returned \(finalText == nil ? "nil" : "<text>", privacy: .public)")
         if currentSession == nil {
-            print("[Orchestrator] finalizeAndInject: session gone after awaitFinal, bailing")
+            Self.log.debug("finalizeAndInject: session gone after awaitFinal, bailing")
             return
         }
 
@@ -253,12 +273,12 @@ public actor Orchestrator {
 
         let injected: String?
         if let text = finalText, !text.isEmpty {
-            print("[Orchestrator] finalizeAndInject: INJECTING '\(text)'")
+            Self.log.debug("finalizeAndInject INJECTING (\(text.count) chars)")
             try? await injector.inject(text: text, hint: .auto)
-            print("[Orchestrator] finalizeAndInject: injection complete")
+            Self.log.debug("finalizeAndInject: injection complete")
             injected = text
         } else {
-            print("[Orchestrator] finalizeAndInject: nothing to inject")
+            Self.log.debug("finalizeAndInject: nothing to inject")
             injected = nil
         }
 
@@ -267,7 +287,7 @@ public actor Orchestrator {
             await usage.recordSession(durationMs: durationMs, provider: provider.name)
         }
         sessionStartedAt = nil
-        print("[Orchestrator] finalizeAndInject: yielding .sessionEnded")
+        Self.log.debug("finalizeAndInject yielding .sessionEnded")
         eventsContinuation.yield(.sessionEnded(injectedText: injected))
     }
 
@@ -368,6 +388,7 @@ public actor Orchestrator {
         eventsStreamFinished = false
         postCommitFinalReceived = false
         partialsReceived = false
+        currentPartial = ""
         if let waiter = finalizationWaiter {
             finalizationWaiter = nil
             waiter.resume()
@@ -398,22 +419,22 @@ public actor Orchestrator {
     ///    recovery flow as `handleSystemSleep`.
     private func handleSessionStreamEnded(epoch: UInt64) async {
         guard epoch == sessionEpoch else {
-            print("[Orchestrator] streamEnded: stale epoch \(epoch) vs \(sessionEpoch), skipping")
+            Self.log.debug("streamEnded: stale epoch \(epoch) vs \(self.sessionEpoch), skipping")
             return
         }
-        print("[Orchestrator] streamEnded: epoch=\(epoch) finalizing=\(finalizing) waiter=\(finalizationWaiter != nil)")
+        Self.log.debug("streamEnded epoch=\(epoch) finalizing=\(self.finalizing) waiter=\(self.finalizationWaiter != nil)")
         eventsStreamFinished = true
         if let waiter = finalizationWaiter {
             finalizationWaiter = nil
-            print("[Orchestrator] streamEnded: resuming finalization waiter")
+            Self.log.debug("streamEnded: resuming finalization waiter")
             waiter.resume()
             return
         }
         if finalizing {
-            print("[Orchestrator] streamEnded: finalizing in progress, flag set for sync pickup")
+            Self.log.debug("streamEnded: finalizing in progress, flag set for sync pickup")
             return
         }
-        print("[Orchestrator] streamEnded: unexpected teardown — running interruptAndReset")
+        Self.log.warning("streamEnded: unexpected teardown — running interruptAndReset")
         await interruptAndReset()
     }
 
@@ -421,23 +442,28 @@ public actor Orchestrator {
         switch event {
         case .partial(let text, _):
             partialsReceived = true
+            currentPartial = text
             eventsContinuation.yield(.partial(text: text))
         case .final(let text, _):
             guard !text.isEmpty else { return }
-            print("[Orchestrator] .final received: '\(text)' (finalizing=\(finalizing), accumulated='\(accumulatedFinal)')")
+            Self.log.debug(".final received (\(text.count) chars, finalizing=\(self.finalizing))")
             if accumulatedFinal.isEmpty {
                 accumulatedFinal = text
             } else {
                 accumulatedFinal += " " + text
             }
+            // The in-progress partial just got committed into accumulatedFinal —
+            // drop it so the timeout-fallback path can't double-emit it on top
+            // of the committed text.
+            currentPartial = ""
             if finalizing {
                 postCommitFinalReceived = true
                 if let waiter = finalizationWaiter {
                     finalizationWaiter = nil
-                    print("[Orchestrator] .final: resuming finalization waiter")
+                    Self.log.debug(".final: resuming finalization waiter")
                     waiter.resume()
                 } else {
-                    print("[Orchestrator] .final: no waiter, flag set for sync pickup")
+                    Self.log.debug(".final: no waiter, flag set for sync pickup")
                 }
             }
         case .warning(let message):
@@ -449,22 +475,55 @@ public actor Orchestrator {
 
     /// Suspend until the committed transcript arrives (post-commit `.final`)
     /// or the session's events stream finishes, then return the accumulated
-    /// transcript. Returns `nil` if no `.final` events ever arrived, or if
-    /// the session was torn down before any commit.
+    /// transcript. Returns `nil` if no `.final` events ever arrived AND no
+    /// partial was in flight when the session was torn down.
+    ///
+    /// On timeout the suspension also resumes — `awaitFinal` then falls back
+    /// to whatever text is in hand: committed segments first, plus the most
+    /// recent in-progress partial. This is the recovery path for the
+    /// pathological "server stopped responding mid-finalize" case where the
+    /// TCP layer takes 10–15 s to notice the WebSocket is dead; without the
+    /// fallback the user would lose a transcript they could already see on
+    /// screen.
     private func awaitFinal() async -> String? {
-        print("[Orchestrator] awaitFinal: postCommit=\(postCommitFinalReceived) streamFinished=\(eventsStreamFinished) accumulated='\(accumulatedFinal)'")
+        Self.log.debug("awaitFinal postCommit=\(self.postCommitFinalReceived) streamFinished=\(self.eventsStreamFinished)")
         if !eventsStreamFinished && !postCommitFinalReceived {
-            print("[Orchestrator] awaitFinal: suspending on continuation")
+            let timeoutToken = await timerScheduler.schedule(after: finalizeTimeout) { [weak self] in
+                await self?.fireFinalizeTimeout()
+            }
+            Self.log.debug("awaitFinal: suspending on continuation")
             await withCheckedContinuation { continuation in
                 finalizationWaiter = continuation
             }
-            print("[Orchestrator] awaitFinal: resumed (postCommit=\(postCommitFinalReceived) streamFinished=\(eventsStreamFinished) accumulated='\(accumulatedFinal)')")
+            await timerScheduler.cancel(timeoutToken)
+            Self.log.debug("awaitFinal resumed postCommit=\(self.postCommitFinalReceived) streamFinished=\(self.eventsStreamFinished)")
         }
-        let text = accumulatedFinal
+        let combined: String
+        if !accumulatedFinal.isEmpty && !currentPartial.isEmpty {
+            combined = accumulatedFinal + " " + currentPartial
+        } else if !accumulatedFinal.isEmpty {
+            combined = accumulatedFinal
+        } else {
+            combined = currentPartial
+        }
         accumulatedFinal = ""
+        currentPartial = ""
         eventsStreamFinished = false
         postCommitFinalReceived = false
-        return text.isEmpty ? nil : text
+        return combined.isEmpty ? nil : combined
+    }
+
+    /// Timer callback for the finalize-after-EOS timeout. Resumes the
+    /// finalization waiter if it's still pending so `awaitFinal()` can
+    /// return whatever text is in hand instead of blocking indefinitely
+    /// on a half-dead WebSocket. No-op if the waiter was already resumed
+    /// by a `.final` event or the session's stream finishing first.
+    private func fireFinalizeTimeout() async {
+        if let waiter = finalizationWaiter {
+            finalizationWaiter = nil
+            Self.log.warning("finalize timed out after \(String(describing: self.finalizeTimeout)) — falling back to accumulated/partial text")
+            waiter.resume()
+        }
     }
 
     // MARK: - Audio forwarding
@@ -497,10 +556,10 @@ public actor Orchestrator {
             forwardedFrames += 1
             // Log every ~1 s of audio (50 frames @ 20 ms each).
             if forwardedFrames % 50 == 0 {
-                print("[Orchestrator] forwarded \(forwardedFrames) audio frames so far")
+                Self.log.debug("forwarded \(self.forwardedFrames) audio frames so far")
             }
         } catch {
-            print("[Orchestrator] pushAudio failed: \(error)")
+            Self.log.error("pushAudio failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

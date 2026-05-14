@@ -183,3 +183,128 @@ struct OrchestratorSilenceFinalizationTests {
         #expect(await rig.provider.sessions.count == 2)
     }
 }
+
+/// Regression tests for the "panel hangs ~15 s, then closes with a WebSocket
+/// error" bug. When the ElevenLabs server stops responding mid-finalize
+/// without sending a close frame, the OS TCP layer can take 10–15 s to
+/// surface the failure on `URLSessionWebSocketTask.receive()`. During that
+/// window `awaitFinal()` previously had no escape hatch — the user saw
+/// their transcript on screen and lost it on close. Fix: cap the wait via
+/// the `finalizeTimeout` parameter, and on timeout commit whatever text we
+/// have (committed segments plus the last in-flight partial).
+///
+/// `SilentSession.yieldPartial(...)` simulates "server got speech and
+/// emitted partials, then went quiet forever" — the buggy real-world path.
+@Suite("Orchestrator: finalize timeout fallback")
+struct OrchestratorFinalizeTimeoutTests {
+
+    private func makeRig() -> (
+        orchestrator: Orchestrator,
+        provider: SilentProvider,
+        injector: FakeInjector,
+        audio: FakeAudioCapture,
+        timer: ManualTimerScheduler
+    ) {
+        let provider = SilentProvider()
+        let injector = FakeInjector()
+        let audio = FakeAudioCapture()
+        let timer = ManualTimerScheduler()
+        let fsm = ActivationStateMachine()
+        let usage = UsageTracker()
+        let orchestrator = Orchestrator(
+            provider: provider,
+            injector: injector,
+            stateMachine: fsm,
+            usage: usage,
+            audioCapture: audio,
+            timerScheduler: timer,
+            // Duration is irrelevant under a manual scheduler — fireAll
+            // drives the firing — but pass an explicit non-default so the
+            // test communicates intent at the call site.
+            finalizeTimeout: .milliseconds(10)
+        )
+        return (orchestrator, provider, injector, audio, timer)
+    }
+
+    /// Spin (yielding) until the manual timer scheduler has a pending
+    /// action queued. Used by the timeout test to know "the orchestrator
+    /// has reached the suspended-on-awaitFinal state and registered its
+    /// timeout — safe to fireAll now." Bails after a generous spin cap so
+    /// a regression that fails to schedule the timer surfaces as a test
+    /// failure rather than a hang.
+    private func waitForPending(_ timer: ManualTimerScheduler, atLeast count: Int) async {
+        for _ in 0..<2000 {
+            if await timer.pendingCount >= count { return }
+            await Task.yield()
+        }
+    }
+
+    @Test("timeout commits the last in-flight partial when no .final ever arrives",
+          .timeLimit(.minutes(1)))
+    func timeoutCommitsLastPartial() async {
+        let rig = makeRig()
+
+        await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
+        await rig.timer.fireAll()
+        #expect(await rig.orchestrator.isCapturing())
+
+        // Server sees speech and emits a partial, then goes quiet forever.
+        await rig.provider.lastSession?.yieldPartial("hello world")
+        // Let the session-event consumer Task pull the partial into the
+        // orchestrator's state (partialsReceived + currentPartial).
+        for _ in 0..<32 { await Task.yield() }
+
+        // Drive keyUp in a Task so the test can step the timer while
+        // finalizeAndInject is suspended inside awaitFinal.
+        let handleTask = Task {
+            await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
+        }
+        // Wait until the orchestrator has scheduled the finalize timeout.
+        await waitForPending(rig.timer, atLeast: 1)
+        await rig.timer.fireAll()
+        await handleTask.value
+
+        let received = await rig.injector.received
+        #expect(received == ["hello world"])
+        #expect(await !rig.orchestrator.isCapturing())
+        // The session DID get an EOS — this is the not-fast-path branch.
+        let eosCount = await rig.provider.lastSession?.endOfStreamCount ?? -1
+        #expect(eosCount == 1)
+    }
+
+    @Test("orchestrator is reusable after a timeout-fallback session",
+          .timeLimit(.minutes(1)))
+    func reusableAfterTimeout() async {
+        let rig = makeRig()
+
+        // First session: partial arrives, then timeout commits it.
+        await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
+        await rig.timer.fireAll()
+        await rig.provider.lastSession?.yieldPartial("first")
+        for _ in 0..<32 { await Task.yield() }
+        let firstHandle = Task {
+            await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
+        }
+        await waitForPending(rig.timer, atLeast: 1)
+        await rig.timer.fireAll()
+        await firstHandle.value
+
+        // Second session must open cleanly even though the first ended
+        // via the timeout fallback path.
+        await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
+        await rig.timer.fireAll()
+        #expect(await rig.orchestrator.isCapturing())
+        await rig.provider.lastSession?.yieldPartial("second")
+        for _ in 0..<32 { await Task.yield() }
+        let secondHandle = Task {
+            await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
+        }
+        await waitForPending(rig.timer, atLeast: 1)
+        await rig.timer.fireAll()
+        await secondHandle.value
+
+        let received = await rig.injector.received
+        #expect(received == ["first", "second"])
+        #expect(await rig.provider.sessions.count == 2)
+    }
+}

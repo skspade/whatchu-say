@@ -477,6 +477,14 @@ actor SilentSession: SttSession {
         closed = true
         continuation.finish()
     }
+
+    /// Yield a partial transcript without yielding any final. Used by the
+    /// finalize-timeout tests to model the "server got speech but never
+    /// committed and the WebSocket is hanging" pathological path —
+    /// distinct from the bare-silence fast-path the suite was built for.
+    nonisolated func yieldPartial(_ text: String = "stub") {
+        continuation.yield(.partial(text: text, stability: 0.5))
+    }
 }
 
 // MARK: - EventCollector
