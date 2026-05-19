@@ -245,7 +245,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             return try await keychain.read(provider: provider)?.nonEmpty
         } catch {
-            print("[WhatchuSay] keychain read failed: \(error)")
+            // Surface in the error log the user actually checks — a silent
+            // print here is why a revoked-signature keychain failure looked
+            // like "no key" with no explanation. `KeychainError` is
+            // CustomStringConvertible, so this carries the actionable
+            // "open Keychain Access…" guidance for the orphaned case.
+            errorLog.record(text: "Keychain read failed: \(error)")
             return nil
         }
     }

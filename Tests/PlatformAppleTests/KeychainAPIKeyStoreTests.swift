@@ -61,5 +61,39 @@ struct KeychainAPIKeyStoreTests {
         try await store.delete(provider: "elevenlabs")
         try await store.delete(provider: "openai")
     }
+
+    // The delete-and-recreate recovery in `write` only triggers on a real
+    // ACL/trust failure (an entry owned by a now-revoked code signature),
+    // which can't be reproduced in-process. These cover the error surface
+    // it falls back to.
+
+    @Test("osStatus description is stable for the alert path")
+    func osStatusDescription() {
+        let error = KeychainAPIKeyStore.KeychainError.osStatus(-67820)
+        #expect(error.description == "osStatus(-67820)")
+        #expect(String(describing: error) == "osStatus(-67820)")
+    }
+
+    @Test("orphanedEntry surfaces an actionable message and is Equatable")
+    func orphanedEntryMessage() {
+        let error = KeychainAPIKeyStore.KeychainError.orphanedEntry(
+            updateStatus: -67820,
+            deleteStatus: -25300
+        )
+        #expect(error.description.contains("Keychain Access"))
+        #expect(error.errorDescription == error.description)
+        #expect(
+            error == KeychainAPIKeyStore.KeychainError.orphanedEntry(
+                updateStatus: -67820,
+                deleteStatus: -25300
+            )
+        )
+        #expect(
+            error != KeychainAPIKeyStore.KeychainError.orphanedEntry(
+                updateStatus: -67820,
+                deleteStatus: -25291
+            )
+        )
+    }
 }
 #endif
