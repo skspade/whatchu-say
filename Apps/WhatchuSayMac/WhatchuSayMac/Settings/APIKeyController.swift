@@ -81,7 +81,8 @@ final class APIKeyController {
         let sessionConfig = SessionConfig(
             language: providerConfig.language,
             model: providerConfig.model,
-            hints: providerConfig.hints
+            hints: providerConfig.hints,
+            noVerbatim: providerConfig.noVerbatim
         )
         do {
             let session = try await provider.open(config: sessionConfig)

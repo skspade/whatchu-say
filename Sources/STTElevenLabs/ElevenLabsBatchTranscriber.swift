@@ -5,11 +5,18 @@ public struct ElevenLabsBatchTranscriber: BatchTranscriber {
     private let apiKey: String
     private let urlSession: URLSession
     private let modelId: String
+    private let noVerbatim: Bool
 
-    public init(apiKey: String, urlSession: URLSession = .shared, modelId: String = "scribe_v2") {
+    public init(
+        apiKey: String,
+        urlSession: URLSession = .shared,
+        modelId: String = "scribe_v2",
+        noVerbatim: Bool = false
+    ) {
         self.apiKey = apiKey
         self.urlSession = urlSession
         self.modelId = modelId
+        self.noVerbatim = noVerbatim
     }
 
     public func transcribe(
@@ -34,6 +41,9 @@ public struct ElevenLabsBatchTranscriber: BatchTranscriber {
         appendField("diarize", diarize ? "true" : "false")
         if let lang = languageHint {
             appendField("language_code", lang)
+        }
+        if noVerbatim {
+            appendField("no_verbatim", "true")
         }
 
         body.append("--\(boundary)\r\n".data(using: .utf8)!)

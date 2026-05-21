@@ -10,6 +10,13 @@ struct ProviderPane: View {
     @State private var isSaving = false
     @State private var saveError: String?
 
+    @State private var newHint: String = ""
+    @State private var hintError: String?
+
+    /// ElevenLabs realtime caps: 50 terms, 20 chars each.
+    private static let maxHints = 50
+    private static let maxHintLength = 20
+
     var body: some View {
         Form {
             Section("Provider") {
@@ -30,12 +37,34 @@ struct ProviderPane: View {
                     text: optionalStringBinding(\.provider.language),
                     prompt: Text("Auto-detect")
                 )
+            }
 
-                TextField(
-                    "Hints",
-                    text: hintsBinding,
-                    prompt: Text("comma-separated")
+            Section {
+                Toggle(
+                    "Remove filler words",
+                    isOn: store.binding(for: \.provider.noVerbatim)
                 )
+            } footer: {
+                Text("Asks ElevenLabs to strip filler words (\u{201C}um\u{201D}, \u{201C}uh\u{201D}), false starts, and non-speech sounds from transcripts. Applies to dictation and meeting recordings.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                hintsEditor
+            } header: {
+                HStack {
+                    Text("Hints")
+                    Spacer()
+                    Text("\(store.config.provider.hints.count) / \(Self.maxHints)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            } footer: {
+                Text("Bias the model toward specific words — useful for product names, technical jargon, and proper nouns. Up to \(Self.maxHints) terms, \(Self.maxHintLength) characters each.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("API key") {
@@ -174,17 +203,86 @@ struct ProviderPane: View {
         )
     }
 
-    /// Bridge `[String]` hints field to a comma-separated `Binding<String>`.
-    private var hintsBinding: Binding<String> {
-        Binding(
-            get: { store.config.provider.hints.joined(separator: ", ") },
-            set: { newValue in
-                let parts = newValue
-                    .split(separator: ",")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty }
-                store.update { $0.provider.hints = parts }
+    // MARK: - Hints editor
+
+    @ViewBuilder
+    private var hintsEditor: some View {
+        let hints = store.config.provider.hints
+
+        if hints.isEmpty {
+            Text("No hints added.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(Array(hints.enumerated()), id: \.offset) { index, hint in
+                HStack {
+                    Text(hint)
+                    Spacer()
+                    Button {
+                        removeHint(at: index)
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Remove")
+                }
             }
-        )
+        }
+
+        HStack {
+            TextField(
+                "Add hint",
+                text: $newHint,
+                prompt: Text("e.g. Pantomath")
+            )
+            .onSubmit(addHint)
+            Button("Add", action: addHint)
+                .disabled(addDisabled)
+        }
+
+        if let hintError {
+            Text(hintError)
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+    }
+
+    private var addDisabled: Bool {
+        let trimmed = newHint.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty
+            || store.config.provider.hints.count >= Self.maxHints
+    }
+
+    private func addHint() {
+        let trimmed = newHint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        if trimmed.count > Self.maxHintLength {
+            hintError = "Hints must be \(Self.maxHintLength) characters or fewer (this one is \(trimmed.count))."
+            return
+        }
+
+        let existing = store.config.provider.hints
+        if existing.count >= Self.maxHints {
+            hintError = "Hint limit reached (\(Self.maxHints))."
+            return
+        }
+        if existing.contains(trimmed) {
+            hintError = "Already added."
+            return
+        }
+
+        store.update { $0.provider.hints.append(trimmed) }
+        newHint = ""
+        hintError = nil
+    }
+
+    private func removeHint(at index: Int) {
+        store.update {
+            guard $0.provider.hints.indices.contains(index) else { return }
+            $0.provider.hints.remove(at: index)
+        }
+        hintError = nil
     }
 }

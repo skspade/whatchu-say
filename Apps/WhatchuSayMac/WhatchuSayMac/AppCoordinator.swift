@@ -69,7 +69,7 @@ final class AppCoordinator {
         // panes ship (per docs/PLAN_SETTINGS.md §6 step 9 onward).
         let appConfig = configStore.config
 
-        let provider = ElevenLabsProvider(apiKey: apiKey)
+        let provider = ElevenLabsProvider(apiKey: apiKey, noVerbatim: appConfig.provider.noVerbatim)
         let selector = StrategySelector(
             defaultStrategy: appConfig.injection.defaultStrategy,
             typeMaxChars: Int(appConfig.injection.typeMaxCharsForAuto),
@@ -94,7 +94,8 @@ final class AppCoordinator {
             sessionConfig: SessionConfig(
                 language: appConfig.provider.language,
                 model: appConfig.provider.model,
-                hints: appConfig.provider.hints
+                hints: appConfig.provider.hints,
+                noVerbatim: appConfig.provider.noVerbatim
             )
         )
         let bindings = HotkeyConfigTranslator.bindings(from: appConfig.hotkey)

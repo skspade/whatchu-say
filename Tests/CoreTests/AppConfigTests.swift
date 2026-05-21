@@ -8,12 +8,13 @@ struct AppConfigDefaultsTests {
     func freshDefaults() {
         let config = AppConfig()
 
-        #expect(config.schemaVersion == 2)
+        #expect(config.schemaVersion == 3)
 
         #expect(config.provider.providerName == "elevenlabs")
         #expect(config.provider.model == nil)
         #expect(config.provider.language == nil)
         #expect(config.provider.hints == [])
+        #expect(config.provider.noVerbatim == false)
 
         #expect(config.hotkey.keyCode == 0x3D)              // right Option
         #expect(config.hotkey.modifiers == [])
@@ -110,7 +111,7 @@ struct AppConfigCodableTests {
     func schemaVersionInJSON() throws {
         let data = try JSONEncoder().encode(AppConfig())
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        #expect(object?["schemaVersion"] as? UInt32 == 2)
+        #expect(object?["schemaVersion"] as? UInt32 == 3)
     }
 }
 
