@@ -14,7 +14,7 @@ import Foundation
 ///   When v2 lands, migration handlers run *before* `JSONDecoder` to inject
 ///   defaults for new fields.
 public struct AppConfig: Codable, Sendable, Equatable {
-    public static let currentSchemaVersion: UInt32 = 2
+    public static let currentSchemaVersion: UInt32 = 3
 
     public var schemaVersion: UInt32
     public var provider: ProviderConfig
@@ -60,17 +60,23 @@ public struct ProviderConfig: Codable, Sendable, Equatable {
     public var model: String?
     public var language: String?
     public var hints: [String]
+    /// When true, ask the provider to strip filler words / false starts from
+    /// transcripts (ElevenLabs `no_verbatim`). Applies to both realtime and
+    /// batch (meeting) transcription.
+    public var noVerbatim: Bool
 
     public init(
         providerName: String = "elevenlabs",
         model: String? = nil,
         language: String? = nil,
-        hints: [String] = []
+        hints: [String] = [],
+        noVerbatim: Bool = false
     ) {
         self.providerName = providerName
         self.model = model
         self.language = language
         self.hints = hints
+        self.noVerbatim = noVerbatim
     }
 }
 

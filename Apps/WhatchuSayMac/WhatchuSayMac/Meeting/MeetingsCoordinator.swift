@@ -31,7 +31,10 @@ final class MeetingsCoordinator {
             throw MeetingError.captureSetupFailed("macOS 15+ required for meeting transcription")
         }
         let library = try MeetingLibrary(rootDirectory: MeetingLibrary.defaultRoot())
-        let provider = ElevenLabsProvider(apiKey: apiKey)
+        let provider = ElevenLabsProvider(
+            apiKey: apiKey,
+            noVerbatim: configStore.config.provider.noVerbatim
+        )
         guard let transcriber = provider.batchTranscriber else {
             throw MeetingError.captureSetupFailed("provider has no batch transcriber")
         }

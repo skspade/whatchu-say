@@ -28,6 +28,21 @@ struct ElevenLabsEndpointsTests {
         #expect(items["audio_format"] == "pcm_16000")
         #expect(items["commit_strategy"] == "manual")
         #expect(items["language_code"] == nil)
+        #expect(items["no_verbatim"] == nil)
+    }
+
+    @Test("noVerbatim=true emits no_verbatim query param")
+    func noVerbatimAppended() throws {
+        let url = Endpoints.realtime(config: SessionConfig(noVerbatim: true))
+        let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        #expect(items(components)["no_verbatim"] == "true")
+    }
+
+    @Test("noVerbatim=false omits no_verbatim query param")
+    func noVerbatimOmittedWhenFalse() throws {
+        let url = Endpoints.realtime(config: SessionConfig(noVerbatim: false))
+        let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        #expect(items(components)["no_verbatim"] == nil)
     }
 
     @Test("language_code is included when provided")
@@ -51,6 +66,39 @@ struct ElevenLabsEndpointsTests {
         let url = Endpoints.realtime(config: SessionConfig(model: "scribe_v2_alpha"))
         let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
         #expect(items(components)["model_id"] == "scribe_v2_alpha")
+    }
+
+    @Test("hints become repeated keyterms query items")
+    func keytermsAppended() throws {
+        let url = Endpoints.realtime(
+            config: SessionConfig(hints: ["Pantomath", "WhatchuSay"])
+        )
+        let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let keyterms = (components.queryItems ?? [])
+            .filter { $0.name == "keyterms" }
+            .compactMap(\.value)
+        #expect(keyterms == ["Pantomath", "WhatchuSay"])
+    }
+
+    @Test("no hints means no keyterms query items")
+    func noKeyterms() throws {
+        let url = Endpoints.realtime(config: SessionConfig())
+        let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let keyterms = (components.queryItems ?? []).filter { $0.name == "keyterms" }
+        #expect(keyterms.isEmpty)
+    }
+
+    @Test("keyterms are sanitized: empty / over-length dropped, capped at 50")
+    func keytermsSanitized() {
+        // Mix: valid, empty, whitespace-only, over-length (>20), and 60 valid entries.
+        let many = (0..<60).map { "term\($0)" } // all <= 20 chars
+        let raw = ["good"] + ["", "   "] + ["thisIsWayTooLongTwentyOneChars!"] + many
+        let cleaned = Endpoints.sanitizedKeyterms(raw)
+
+        #expect(cleaned.count == 50)
+        #expect(cleaned.first == "good")
+        #expect(!cleaned.contains(""))
+        #expect(!cleaned.contains(where: { $0.count > 20 }))
     }
 
     private func items(_ components: URLComponents) -> [String: String] {

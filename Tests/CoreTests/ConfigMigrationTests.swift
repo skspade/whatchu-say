@@ -96,4 +96,28 @@ struct ConfigMigrationTests {
         let migrated = try ConfigMigration.migrate(data)
         #expect(migrated.meetings.deleteAudioAfterTranscription == false)
     }
+
+    @Test("v2 JSON migrates to v3 by injecting default provider.noVerbatim=false")
+    func migrateV2ToV3() throws {
+        let defaultConfig = AppConfig()
+        var dict = try JSONSerialization.jsonObject(with: JSONEncoder().encode(defaultConfig)) as! [String: Any]
+        dict["schemaVersion"] = 2
+        var provider = dict["provider"] as! [String: Any]
+        provider.removeValue(forKey: "noVerbatim")
+        dict["provider"] = provider
+        let v2Data = try JSONSerialization.data(withJSONObject: dict)
+
+        let migrated = try ConfigMigration.migrate(v2Data)
+        #expect(migrated.schemaVersion == AppConfig.currentSchemaVersion)
+        #expect(migrated.provider.noVerbatim == false)
+    }
+
+    @Test("v3 JSON with explicit provider.noVerbatim preserved")
+    func v3NoVerbatimPreserved() throws {
+        var config = AppConfig()
+        config.provider.noVerbatim = true
+        let data = try JSONEncoder().encode(config)
+        let migrated = try ConfigMigration.migrate(data)
+        #expect(migrated.provider.noVerbatim == true)
+    }
 }

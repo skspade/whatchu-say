@@ -17,10 +17,12 @@ public struct ElevenLabsProvider: SttProvider {
 
     private let apiKey: String
     private let urlSession: URLSession
+    private let noVerbatim: Bool
 
-    public init(apiKey: String, urlSession: URLSession = .shared) {
+    public init(apiKey: String, urlSession: URLSession = .shared, noVerbatim: Bool = false) {
         self.apiKey = apiKey
         self.urlSession = urlSession
+        self.noVerbatim = noVerbatim
     }
 
     public func open(config: SessionConfig) async throws -> any SttSession {
@@ -34,6 +36,10 @@ public struct ElevenLabsProvider: SttProvider {
     }
 
     public var batchTranscriber: (any BatchTranscriber)? {
-        ElevenLabsBatchTranscriber(apiKey: apiKey, urlSession: urlSession)
+        ElevenLabsBatchTranscriber(
+            apiKey: apiKey,
+            urlSession: urlSession,
+            noVerbatim: noVerbatim
+        )
     }
 }

@@ -8,6 +8,10 @@ public struct SessionConfig: Sendable {
     public let punctuation: Bool
     public let hints: [String]
     public let endpointDetection: EndpointMode
+    /// When true, ask the provider to strip filler words ("um", "uh"), false
+    /// starts, and non-speech sounds from the transcript. Maps to ElevenLabs'
+    /// `no_verbatim` flag on both the realtime WebSocket and batch endpoints.
+    public let noVerbatim: Bool
 
     public init(
         sampleRate: UInt32 = 16_000,
@@ -16,7 +20,8 @@ public struct SessionConfig: Sendable {
         interimResults: Bool = true,
         punctuation: Bool = true,
         hints: [String] = [],
-        endpointDetection: EndpointMode = .clientControlled
+        endpointDetection: EndpointMode = .clientControlled,
+        noVerbatim: Bool = false
     ) {
         self.sampleRate = sampleRate
         self.language = language
@@ -25,6 +30,7 @@ public struct SessionConfig: Sendable {
         self.punctuation = punctuation
         self.hints = hints
         self.endpointDetection = endpointDetection
+        self.noVerbatim = noVerbatim
     }
 }
 

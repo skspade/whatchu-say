@@ -51,6 +51,9 @@ public enum ConfigMigration {
         if envelope.schemaVersion < 2 {
             migrateV1ToV2(&working)
         }
+        if envelope.schemaVersion < 3 {
+            migrateV2ToV3(&working)
+        }
         working["schemaVersion"] = AppConfig.currentSchemaVersion
 
         let migrated: Data
@@ -74,6 +77,15 @@ public enum ConfigMigration {
                 "showConsentReminder": true,
                 "deleteAudioAfterTranscription": true,
             ]
+        }
+    }
+
+    private static func migrateV2ToV3(_ dict: inout [String: Any]) {
+        if var provider = dict["provider"] as? [String: Any] {
+            if provider["noVerbatim"] == nil {
+                provider["noVerbatim"] = false
+                dict["provider"] = provider
+            }
         }
     }
 
