@@ -123,6 +123,8 @@ struct OrchestratorEventTests {
         await rig.timer.fireAll()
 
         await rig.provider.yieldWarning("transient hiccup")
+        await rig.provider.yieldPartial("recovering")
+        _ = await collector.waitForEvent(.partial(text: "recovering"))
         await rig.provider.yieldFinal("recovered text")
 
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
@@ -198,9 +200,8 @@ struct OrchestratorEventTests {
         // finishes (mirrors ElevenLabsSession's tearDown after .error).
         await rig.provider.yieldWarning("service_busy")
         await rig.provider.lastSession?.close()
-        for _ in 0..<8 { await Task.yield() }
 
-        let events = await collector.snapshot()
+        let events = await collector.waitForEvent(.sessionEnded(injectedText: nil))
         #expect(events.contains(.error(text: "service_busy")))
         #expect(events.contains(.sessionEnded(injectedText: nil)))
         #expect(!events.contains(.finalizing))
@@ -227,7 +228,7 @@ struct OrchestratorEventTests {
         // Mid-press-hold the session dies. Without the fix, the trailing
         // keyUp deadlocks in awaitFinal forever.
         await rig.provider.lastSession?.close()
-        for _ in 0..<8 { await Task.yield() }
+        _ = await collector.waitForEvent(.sessionEnded(injectedText: nil))
 
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 

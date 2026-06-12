@@ -52,6 +52,8 @@ struct OrchestratorFinalizationTimingTests {
           .timeLimit(.minutes(1)))
     func finalizesOnCommittedTranscript() async {
         let rig = makeRig()
+        let collector = EventCollector()
+        await collector.start(stream: rig.orchestrator.events)
 
         await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
         await rig.timer.fireAll()
@@ -59,45 +61,55 @@ struct OrchestratorFinalizationTimingTests {
 
         // Mark the session as "server heard speech" so finalize sends EOS
         // instead of taking the silence fast-path.
-        await rig.provider.lastSession?.yieldPartial()
+        await rig.provider.lastSession?.yieldPartial("heard speech")
+        _ = await collector.waitForEvent(.partial(text: "heard speech"))
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 
         let received = await rig.injector.received
         #expect(received == ["delayed close transcription"])
         #expect(await !rig.orchestrator.isCapturing())
+        await collector.cancel()
     }
 
     @Test("text is injected exactly once, not duplicated",
           .timeLimit(.minutes(1)))
     func injectsExactlyOnce() async {
         let rig = makeRig()
+        let collector = EventCollector()
+        await collector.start(stream: rig.orchestrator.events)
 
         await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
         await rig.timer.fireAll()
 
-        await rig.provider.lastSession?.yieldPartial()
+        await rig.provider.lastSession?.yieldPartial("heard once")
+        _ = await collector.waitForEvent(.partial(text: "heard once"))
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 
         let received = await rig.injector.received
         #expect(received.count == 1)
+        await collector.cancel()
     }
 
     @Test("orchestrator is reusable after delayed-close finalization",
           .timeLimit(.minutes(1)))
     func reusableAfterDelayedClose() async {
         let rig = makeRig()
+        let collector = EventCollector()
+        await collector.start(stream: rig.orchestrator.events)
 
         // First session
         await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
         await rig.timer.fireAll()
-        await rig.provider.lastSession?.yieldPartial()
+        await rig.provider.lastSession?.yieldPartial("first heard")
+        _ = await collector.waitForEvent(.partial(text: "first heard"))
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 
         // Second session
         await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
         await rig.timer.fireAll()
         #expect(await rig.orchestrator.isCapturing())
-        await rig.provider.lastSession?.yieldPartial()
+        await rig.provider.lastSession?.yieldPartial("second heard")
+        _ = await collector.waitForEvent(.partial(text: "second heard"))
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 
         let received = await rig.injector.received
@@ -105,6 +117,7 @@ struct OrchestratorFinalizationTimingTests {
             "delayed close transcription",
             "delayed close transcription",
         ])
+        await collector.cancel()
     }
 }
 
@@ -243,6 +256,8 @@ struct OrchestratorFinalizeTimeoutTests {
           .timeLimit(.minutes(1)))
     func timeoutCommitsLastPartial() async {
         let rig = makeRig()
+        let collector = EventCollector()
+        await collector.start(stream: rig.orchestrator.events)
 
         await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
         await rig.timer.fireAll()
@@ -250,9 +265,9 @@ struct OrchestratorFinalizeTimeoutTests {
 
         // Server sees speech and emits a partial, then goes quiet forever.
         await rig.provider.lastSession?.yieldPartial("hello world")
-        // Let the session-event consumer Task pull the partial into the
-        // orchestrator's state (partialsReceived + currentPartial).
-        for _ in 0..<32 { await Task.yield() }
+        // Wait until the orchestrator has pulled the partial into state
+        // (partialsReceived + currentPartial).
+        _ = await collector.waitForEvent(.partial(text: "hello world"))
 
         // Drive keyUp in a Task so the test can step the timer while
         // finalizeAndInject is suspended inside awaitFinal.
@@ -270,18 +285,21 @@ struct OrchestratorFinalizeTimeoutTests {
         // The session DID get an EOS — this is the not-fast-path branch.
         let eosCount = await rig.provider.lastSession?.endOfStreamCount ?? -1
         #expect(eosCount == 1)
+        await collector.cancel()
     }
 
     @Test("orchestrator is reusable after a timeout-fallback session",
           .timeLimit(.minutes(1)))
     func reusableAfterTimeout() async {
         let rig = makeRig()
+        let collector = EventCollector()
+        await collector.start(stream: rig.orchestrator.events)
 
         // First session: partial arrives, then timeout commits it.
         await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
         await rig.timer.fireAll()
         await rig.provider.lastSession?.yieldPartial("first")
-        for _ in 0..<32 { await Task.yield() }
+        _ = await collector.waitForEvent(.partial(text: "first"))
         let firstHandle = Task {
             await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
         }
@@ -295,7 +313,7 @@ struct OrchestratorFinalizeTimeoutTests {
         await rig.timer.fireAll()
         #expect(await rig.orchestrator.isCapturing())
         await rig.provider.lastSession?.yieldPartial("second")
-        for _ in 0..<32 { await Task.yield() }
+        _ = await collector.waitForEvent(.partial(text: "second"))
         let secondHandle = Task {
             await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
         }
@@ -306,5 +324,164 @@ struct OrchestratorFinalizeTimeoutTests {
         let received = await rig.injector.received
         #expect(received == ["first", "second"])
         #expect(await rig.provider.sessions.count == 2)
+        await collector.cancel()
+    }
+}
+
+/// Regression tests for the show-stopper path where releasing the hotkey
+/// blocks in `stopAndDrainAudio()` before the existing finalize timeout is
+/// installed. The user saw partial text in the HUD, but a WebSocket receive
+/// error finished the session stream while an audio send was still stuck.
+/// Without explicit drain-waiter recovery, release never emits
+/// `.sessionEnded`, leaving the app in a permanent listening state.
+@Suite("Orchestrator: stream-ended recovery during audio drain")
+struct OrchestratorDrainStreamEndedRecoveryTests {
+
+    private func makeRig() async -> (
+        orchestrator: Orchestrator,
+        provider: BlockingPushProvider,
+        injector: FakeInjector,
+        audio: FakeAudioCapture,
+        timer: ManualTimerScheduler,
+        events: EventCollector
+    ) {
+        let provider = BlockingPushProvider()
+        let injector = FakeInjector()
+        let audio = FakeAudioCapture()
+        let timer = ManualTimerScheduler()
+        let fsm = ActivationStateMachine()
+        let usage = UsageTracker()
+        let orchestrator = Orchestrator(
+            provider: provider,
+            injector: injector,
+            stateMachine: fsm,
+            usage: usage,
+            audioCapture: audio,
+            timerScheduler: timer
+        )
+        let events = EventCollector()
+        await events.start(stream: orchestrator.events)
+        return (orchestrator, provider, injector, audio, timer, events)
+    }
+
+    private func waitForPushBlocked(_ session: BlockingPushSession) async {
+        for _ in 0..<2_000 {
+            if await session.isPushBlocked { return }
+            await Task.yield()
+        }
+    }
+
+    private func waitForStopCount(_ audio: FakeAudioCapture, atLeast count: Int) async {
+        for _ in 0..<2_000 {
+            if await audio.stopCount >= count { return }
+            await Task.yield()
+        }
+    }
+
+    private func completes(_ task: Task<Void, Never>, within timeout: Duration) async -> Bool {
+        let flag = CompletionFlag()
+        let observer = Task {
+            await task.value
+            await flag.markDone()
+        }
+        try? await Task.sleep(for: timeout)
+        if await flag.isDone {
+            await observer.value
+            return true
+        }
+        observer.cancel()
+        return false
+    }
+
+    @Test("release pastes visible partial and resets when stream ends during audio drain",
+          .timeLimit(.minutes(1)))
+    func streamEndDuringDrainPastesPartialAndResets() async {
+        let rig = await makeRig()
+
+        await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
+        await rig.timer.fireAll()
+        #expect(await rig.orchestrator.isCapturing())
+
+        guard let session = await rig.provider.lastSession else {
+            Issue.record("expected provider to create a session")
+            return
+        }
+
+        session.yieldPartial("visible transcript")
+        _ = await rig.events.waitForEvent(.partial(text: "visible transcript"))
+
+        rig.audio.push(AudioFrame(samples: [1], timestamp: .zero))
+        await waitForPushBlocked(session)
+        #expect(await session.isPushBlocked)
+
+        let releaseTask = Task {
+            await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
+        }
+        await waitForStopCount(rig.audio, atLeast: 1)
+
+        session.finishStream()
+        let completedWithoutManualPushRelease = await completes(
+            releaseTask,
+            within: .milliseconds(250)
+        )
+        if !completedWithoutManualPushRelease {
+            await session.releasePush()
+            await releaseTask.value
+        }
+
+        #expect(completedWithoutManualPushRelease)
+        #expect(await rig.injector.received == ["visible transcript"])
+        #expect(await !rig.orchestrator.isCapturing())
+
+        let events = await rig.events.snapshot()
+        #expect(events.contains(.sessionEnded(injectedText: "visible transcript")))
+    }
+
+    @Test("orchestrator is reusable after stream-ended drain recovery",
+          .timeLimit(.minutes(1)))
+    func reusableAfterStreamEndDuringDrain() async {
+        let rig = await makeRig()
+
+        await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
+        await rig.timer.fireAll()
+        guard let firstSession = await rig.provider.lastSession else {
+            Issue.record("expected first session")
+            return
+        }
+        firstSession.yieldPartial("first visible")
+        _ = await rig.events.waitForEvent(.partial(text: "first visible"))
+        rig.audio.push(AudioFrame(samples: [1], timestamp: .zero))
+        await waitForPushBlocked(firstSession)
+        let firstRelease = Task {
+            await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
+        }
+        await waitForStopCount(rig.audio, atLeast: 1)
+        firstSession.finishStream()
+        let firstCompleted = await completes(firstRelease, within: .milliseconds(250))
+        if !firstCompleted {
+            await firstSession.releasePush()
+            await firstRelease.value
+        }
+        #expect(firstCompleted)
+
+        await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
+        await rig.timer.fireAll()
+        #expect(await rig.orchestrator.isCapturing())
+
+        let received = await rig.injector.received
+        #expect(received == ["first visible"])
+        #expect(await rig.provider.sessions.count == 2)
+    }
+}
+
+private actor CompletionFlag {
+    private var done = false
+
+    func markDone() {
+        done = true
+    }
+
+    var isDone: Bool {
+        done
     }
 }

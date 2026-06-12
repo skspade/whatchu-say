@@ -487,6 +487,89 @@ actor SilentSession: SttSession {
     }
 }
 
+// MARK: - BlockingPushProvider / BlockingPushSession
+
+/// Provider whose session can suspend inside `pushAudio(_:)` until tests or
+/// `close()` release it. This models a WebSocket send stuck behind a broken
+/// connection while the receive side has already surfaced stream termination.
+actor BlockingPushProvider: SttProvider {
+    nonisolated let name = "blocking-push"
+    nonisolated let capabilities = Capabilities(
+        partials: true,
+        punctuation: true,
+        languages: .auto,
+        sampleRates: [16_000],
+        maxSessionSeconds: nil,
+        supportsClientEndpointing: true
+    )
+
+    private(set) var sessions: [BlockingPushSession] = []
+
+    func open(config: SessionConfig) async throws -> any SttSession {
+        let session = BlockingPushSession()
+        sessions.append(session)
+        return session
+    }
+
+    var lastSession: BlockingPushSession? { sessions.last }
+}
+
+actor BlockingPushSession: SttSession {
+    nonisolated let events: AsyncStream<SttEvent>
+    private nonisolated let continuation: AsyncStream<SttEvent>.Continuation
+
+    private var pushContinuation: CheckedContinuation<Void, Never>?
+    private var pushStarted = false
+    private var closed = false
+    private(set) var endOfStreamCount = 0
+    private(set) var closeCount = 0
+
+    init() {
+        let (stream, cont) = AsyncStream<SttEvent>.makeStream()
+        self.events = stream
+        self.continuation = cont
+    }
+
+    func pushAudio(_ samples: [Int16]) async throws {
+        pushStarted = true
+        await withCheckedContinuation { cont in
+            pushContinuation = cont
+        }
+        if closed {
+            throw SttError.cancelled
+        }
+    }
+
+    func endOfStream() async throws {
+        endOfStreamCount += 1
+    }
+
+    func close() async {
+        closeCount += 1
+        closed = true
+        releasePush()
+        continuation.finish()
+    }
+
+    var isPushBlocked: Bool {
+        pushStarted && pushContinuation != nil
+    }
+
+    func releasePush() {
+        guard let cont = pushContinuation else { return }
+        pushContinuation = nil
+        cont.resume()
+    }
+
+    nonisolated func yieldPartial(_ text: String) {
+        continuation.yield(.partial(text: text, stability: 0.5))
+    }
+
+    nonisolated func finishStream() {
+        continuation.finish()
+    }
+}
+
 // MARK: - EventCollector
 
 /// Drains an `AsyncStream<OrchestratorEvent>` into an array so tests can
@@ -515,6 +598,20 @@ actor EventCollector {
     /// collected so far.
     func snapshot() async -> [OrchestratorEvent] {
         for _ in 0..<8 { await Task.yield() }
+        return collected
+    }
+
+    /// Wait until a specific event has been collected, then return the full
+    /// buffer. This avoids sampling the stream before the consumer Task has
+    /// processed an async event.
+    func waitForEvent(
+        _ expected: OrchestratorEvent,
+        maxYields: Int = 2_000
+    ) async -> [OrchestratorEvent] {
+        for _ in 0..<maxYields {
+            if collected.contains(expected) { return collected }
+            await Task.yield()
+        }
         return collected
     }
 

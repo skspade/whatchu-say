@@ -101,6 +101,13 @@ public actor Orchestrator {
     /// `stopAndDrainAudio` to know all captured frames have been forwarded
     /// to the session before we send `endOfStream`.
     private var audioDrainWaiter: CheckedContinuation<Void, Never>?
+    /// True while `stopAndDrainAudio()` is between calling `audioCapture.stop()`
+    /// and observing the end-of-session sentinel or another teardown signal.
+    private var stoppingAndDrainingAudio = false
+    /// Latched when the drain-complete signal arrives before
+    /// `audioDrainWaiter` is installed. Prevents losing the sentinel during
+    /// actor reentrancy while awaiting `audioCapture.stop()`.
+    private var audioDrainComplete = false
 
     public init(
         provider: any SttProvider,
@@ -296,10 +303,33 @@ public actor Orchestrator {
     /// Safe to call when no frames are buffered — the sentinel still flows
     /// through and resumes us immediately.
     private func stopAndDrainAudio() async {
-        await audioCapture.stop()
-        await withCheckedContinuation { cont in
-            audioDrainWaiter = cont
+        stoppingAndDrainingAudio = true
+        audioDrainComplete = false
+        defer {
+            stoppingAndDrainingAudio = false
+            audioDrainComplete = false
         }
+        await audioCapture.stop()
+        if audioDrainComplete { return }
+        await withCheckedContinuation { cont in
+            if audioDrainComplete {
+                cont.resume()
+            } else {
+                audioDrainWaiter = cont
+            }
+        }
+    }
+
+    private func completeAudioDrainWait() {
+        guard let waiter = audioDrainWaiter else {
+            if stoppingAndDrainingAudio {
+                audioDrainComplete = true
+            }
+            return
+        }
+        audioDrainWaiter = nil
+        audioDrainComplete = true
+        waiter.resume()
     }
 
     private func cancelDictation() async {
@@ -389,6 +419,7 @@ public actor Orchestrator {
         postCommitFinalReceived = false
         partialsReceived = false
         currentPartial = ""
+        completeAudioDrainWait()
         if let waiter = finalizationWaiter {
             finalizationWaiter = nil
             waiter.resume()
@@ -431,7 +462,8 @@ public actor Orchestrator {
             return
         }
         if finalizing {
-            Self.log.debug("streamEnded: finalizing in progress, flag set for sync pickup")
+            Self.log.debug("streamEnded: finalizing in progress, resuming drain waiter if present")
+            completeAudioDrainWait()
             return
         }
         Self.log.warning("streamEnded: unexpected teardown — running interruptAndReset")
@@ -491,9 +523,15 @@ public actor Orchestrator {
             let timeoutToken = await timerScheduler.schedule(after: finalizeTimeout) { [weak self] in
                 await self?.fireFinalizeTimeout()
             }
-            Self.log.debug("awaitFinal: suspending on continuation")
-            await withCheckedContinuation { continuation in
-                finalizationWaiter = continuation
+            if !eventsStreamFinished && !postCommitFinalReceived {
+                Self.log.debug("awaitFinal: suspending on continuation")
+                await withCheckedContinuation { continuation in
+                    if eventsStreamFinished || postCommitFinalReceived {
+                        continuation.resume()
+                    } else {
+                        finalizationWaiter = continuation
+                    }
+                }
             }
             await timerScheduler.cancel(timeoutToken)
             Self.log.debug("awaitFinal resumed postCommit=\(self.postCommitFinalReceived) streamFinished=\(self.eventsStreamFinished)")
@@ -544,10 +582,7 @@ public actor Orchestrator {
         // frames for the session have been yielded by the time we see this.
         // Resume any drain waiter; do NOT push to the session.
         if frame.samples.isEmpty {
-            if let cont = audioDrainWaiter {
-                audioDrainWaiter = nil
-                cont.resume()
-            }
+            completeAudioDrainWait()
             return
         }
         guard let session = currentSession else { return }
