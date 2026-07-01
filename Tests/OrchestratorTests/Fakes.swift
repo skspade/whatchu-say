@@ -570,6 +570,62 @@ actor BlockingPushSession: SttSession {
     }
 }
 
+// MARK: - SendFailureProvider / SendFailureSession
+
+/// Models the real-world failure mode where the WebSocket's **send**
+/// direction dies mid-transcription but the receive side is stuck in
+/// `receive()` and never surfaces the error. `pushAudio` throws a
+/// non-cancelled error on every call; the events stream is NOT finished
+/// (mirrors `ElevenLabsSession` when `URLSessionWebSocketTask.receive()`
+/// never returns). Without orchestrator-level recovery, this wedges the
+/// app in listening mode until restart.
+actor SendFailureProvider: SttProvider {
+    nonisolated let name = "send-failure"
+    nonisolated let capabilities = Capabilities(
+        partials: true,
+        punctuation: true,
+        languages: .auto,
+        sampleRates: [16_000],
+        maxSessionSeconds: nil,
+        supportsClientEndpointing: true
+    )
+
+    private(set) var sessions: [SendFailureSession] = []
+
+    func open(config: SessionConfig) async throws -> any SttSession {
+        let session = SendFailureSession()
+        sessions.append(session)
+        return session
+    }
+
+    var lastSession: SendFailureSession? { sessions.last }
+}
+
+final class SendFailureSession: SttSession, @unchecked Sendable {
+    nonisolated let events: AsyncStream<SttEvent>
+    private nonisolated let continuation: AsyncStream<SttEvent>.Continuation
+    private(set) var pushCount: Int = 0
+
+    init() {
+        let (stream, cont) = AsyncStream<SttEvent>.makeStream()
+        self.events = stream
+        self.continuation = cont
+    }
+
+    func pushAudio(_ samples: [Int16]) async throws {
+        pushCount += 1
+        // Simulate a dead send direction. Non-cancelled: this is a genuine
+        // transport failure, not normal teardown.
+        throw SttError.transient("websocket send failed")
+    }
+
+    func endOfStream() async throws {}
+
+    /// Only finishes the events stream on explicit close — i.e. the receive
+    /// side is stuck and never finishes it on its own.
+    func close() async { continuation.finish() }
+}
+
 // MARK: - EventCollector
 
 /// Drains an `AsyncStream<OrchestratorEvent>` into an array so tests can

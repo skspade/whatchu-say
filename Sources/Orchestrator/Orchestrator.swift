@@ -593,8 +593,27 @@ public actor Orchestrator {
             if forwardedFrames % 50 == 0 {
                 Self.log.debug("forwarded \(self.forwardedFrames) audio frames so far")
             }
+        } catch SttError.cancelled {
+            // Expected during normal teardown — the session was closed
+            // out from under the forwarder (cancel, finalize, promote).
+            // The close path owns emitting `.sessionEnded`.
         } catch {
             Self.log.error("pushAudio failed: \(error.localizedDescription, privacy: .public)")
+            // A non-cancelled send failure means the session's transport
+            // is dead. The provider's receive loop may be stuck in
+            // `receive()` and never surface this via its events stream,
+            // which would leave the app wedged in listening mode until
+            // restart. Tear the session down proactively so the existing
+            // recovery flow resets listening state. Skipped during
+            // finalize: the forwarder is draining into a half-dead
+            // session and `finalizeTimeout` already recovers that path;
+            // resetting here would race `finalizeAndInject`.
+            if !finalizing {
+                eventsContinuation.yield(
+                    .error(text: "Connection lost: \(error.localizedDescription)")
+                )
+                await interruptAndReset()
+            }
         }
     }
 
