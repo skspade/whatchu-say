@@ -45,7 +45,7 @@ Effort estimates assume one developer working consistently, not full-time. Phase
 
 ### Milestone 1.2 — macOS dictation core (week 2–4)
 
-**Outcome**: real press-and-hold dictation works against ElevenLabs, in any app, with **paste-default** injection.
+**Outcome**: real press-and-hold dictation works in any app with **paste-default** injection.
 
 **Status (2026-04-29)**: ✅ complete. Bonus: API-key handling moved to Keychain (was originally scoped as env-var-only).
 
@@ -55,6 +55,7 @@ Effort estimates assume one developer working consistently, not full-time. Phase
 - ✅ `InjectorMac` with paste-default strategy + type for short text.
 - ✅ Minimal `WhatchuSayMac` Xcode project with `MenuBarExtra`, hardcoded hotkey, hardcoded API key (env var for now). *(Key now in Keychain via `KeychainAPIKeyStore` + menu-driven `APIKeyPrompt`.)*
 - ✅ First real dictation: hold key, talk, release, see text appear. Pauses while holding don't trigger anything.
+- ✅ Apple SpeechAnalyzer on-device dictation provider (macOS 26+): downloads locale assets before activation, maps progressive/final results to the shared STT contract, exposes device-supported language selection, and requires no dictation API key. ElevenLabs remains available for realtime dictation.
 
 **Exit criteria**: I can dictate a paragraph into TextEdit. Pausing mid-sentence to think doesn't cause premature finalization. No crashes across 20 attempts.
 
@@ -66,8 +67,8 @@ Effort estimates assume one developer working consistently, not full-time. Phase
 
 - ❌ First-run onboarding flow with permission status panes. *(Privacy disclosure is covered by the first-run modal; the Accessibility + Microphone walkthrough panes are still missing.)*
 - ✅ Privacy disclosure pane on first run. *(`FirstRunDisclosure` modal blocks bootstrap until acknowledged; reusable `DisclosureContent` view also rendered in the Privacy settings pane.)*
-- ✅ Settings window with six toolbar tabs — General, Provider, Shortcuts, Output, History, Privacy. Provider config, hotkey rebinding (custom recorder widget), cancel-key rebinding, injection preferences, overlay anchor preference, Reset to Defaults. *(See [PLAN_SETTINGS.md](./PLAN_SETTINGS.md). Provider/Output/Shortcuts changes require coordinator restart to take effect — live re-config is a follow-up.)*
-- ✅ API key entry and Keychain persistence. *(Provider pane is the canonical home; menubar "Update API Key…" entry shares the same save path via `APIKeyController`. Test Connection button does a handshake-only validation.)*
+- ✅ Settings window with six toolbar tabs — General, Provider, Shortcuts, Output, History, Privacy. Provider config, hotkey rebinding (custom recorder widget), cancel-key rebinding, injection preferences, overlay anchor preference, Reset to Defaults. *(See [PLAN_SETTINGS.md](./PLAN_SETTINGS.md). Apply Provider Settings rebuilds the dictation coordinator; other settings still require their documented restart paths.)*
+- ✅ API key entry and Keychain persistence. *(Provider pane is the canonical home; the menubar ElevenLabs key action shares the same save path via `APIKeyController`. Apple Speech dictation uses no key; an ElevenLabs key remains required for meeting transcription.)*
 - ✅ **Floating overlay UI** (`Sources/PlatformApple/Mac/Overlay/`): NSPanel + VU meter view + lifecycle integration. *(Implemented under `Apps/WhatchuSayMac/WhatchuSayMac/HUD/` rather than the originally planned path.)*
 - ✅ **Cancellation flow**: second `CGEventTap` filter for cancel key; consume only during dictation states; orchestrator handles `.cancelDictation`. *(Gate driven by `setDictating(_:)` from orchestrator session events.)*
 - ✅ Per-app injection override UI. *(Output pane → "Per-app overrides" table with `RunningAppPicker` sheet; `StrategySelector` now also honors a global `defaultStrategy` field, covered by `Tests/InjectorTests`.)*

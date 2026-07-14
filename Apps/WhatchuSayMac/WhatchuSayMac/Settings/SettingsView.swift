@@ -10,12 +10,17 @@ import Core
 struct SettingsView: View {
     let store: ConfigStore
     let apiKeys: APIKeyController
+    let applyProviderConfiguration: () async -> Void
 
     var body: some View {
         TabView {
             GeneralPane(store: store)
                 .tabItem { Label("General", systemImage: "gearshape") }
-            ProviderPane(store: store, apiKeys: apiKeys)
+            ProviderPane(
+                store: store,
+                apiKeys: apiKeys,
+                applyProviderConfiguration: applyProviderConfiguration
+            )
                 .tabItem { Label("Provider", systemImage: "cloud") }
             ShortcutsPane(store: store)
                 .tabItem { Label("Shortcuts", systemImage: "keyboard") }

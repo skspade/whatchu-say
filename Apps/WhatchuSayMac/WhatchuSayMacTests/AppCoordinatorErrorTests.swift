@@ -76,6 +76,17 @@ struct AppCoordinatorErrorTests {
         #expect(state.status == .needsSetup)
     }
 
+    @Test("preparingProvider status is sticky while the provider initializes")
+    func preparingProviderIsSticky() {
+        let state = AppState()
+        state.status = .preparingProvider
+        AppCoordinator.applyToAppState(
+            .sessionStarted(mode: .pressHold),
+            state: state
+        )
+        #expect(state.status == .preparingProvider)
+    }
+
     @Test("partial and finalizing events do not touch lastError or status")
     func partialAndFinalizingNoOp() {
         let state = AppState()

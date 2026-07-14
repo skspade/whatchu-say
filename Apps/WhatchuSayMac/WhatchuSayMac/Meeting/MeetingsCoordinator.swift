@@ -3,7 +3,6 @@ import AppKit
 import Core
 import Meeting
 import STTCore
-import STTElevenLabs
 
 /// Owns the singleton `MeetingOrchestrator` and the windows it drives.
 /// Constructed by `AppCoordinator`; lives for the lifetime of the app.
@@ -26,18 +25,11 @@ final class MeetingsCoordinator {
     var elapsedSeconds: Int = 0
     var recordingMeetingID: UUID?
 
-    init(apiKey: String, configStore: ConfigStore) throws {
+    init(transcriber: any BatchTranscriber, configStore: ConfigStore) throws {
         guard #available(macOS 15, *) else {
             throw MeetingError.captureSetupFailed("macOS 15+ required for meeting transcription")
         }
         let library = try MeetingLibrary(rootDirectory: MeetingLibrary.defaultRoot())
-        let provider = ElevenLabsProvider(
-            apiKey: apiKey,
-            noVerbatim: configStore.config.provider.noVerbatim
-        )
-        guard let transcriber = provider.batchTranscriber else {
-            throw MeetingError.captureSetupFailed("provider has no batch transcriber")
-        }
         self.library = library
         self.configStore = configStore
         self.orchestrator = MeetingOrchestrator(

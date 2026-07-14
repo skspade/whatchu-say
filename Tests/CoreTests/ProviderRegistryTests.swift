@@ -9,13 +9,25 @@ struct ProviderRegistryTests {
         #expect(!ProviderRegistry.known.isEmpty)
     }
 
-    @Test("ElevenLabs is registered with the expected identifier and URL")
+    @Test("ElevenLabs is registered with remote processing metadata")
     func elevenlabsEntry() {
         let info = ProviderRegistry.elevenlabs
         #expect(info.identifier == "elevenlabs")
         #expect(info.displayName == "ElevenLabs")
-        #expect(info.dataPolicyURL.scheme == "https")
-        #expect(info.dataPolicyURL.host == "elevenlabs.io")
+        #expect(info.requiresAPIKey)
+        #expect(info.dictationDataHandling == .remote)
+        #expect(info.dataPolicyURL?.scheme == "https")
+        #expect(info.dataPolicyURL?.host == "elevenlabs.io")
+    }
+
+    @Test("Apple is registered as an on-device provider without credentials")
+    func appleEntry() {
+        let info = ProviderRegistry.apple
+        #expect(info.identifier == "apple")
+        #expect(info.displayName == "Apple Speech")
+        #expect(!info.requiresAPIKey)
+        #expect(info.dictationDataHandling == .onDevice)
+        #expect(info.dataPolicyURL == nil)
     }
 
     @Test("Lookup by identifier returns the matching entry")

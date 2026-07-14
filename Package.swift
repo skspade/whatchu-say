@@ -15,6 +15,7 @@ let package = Package(
                 "Audio",
                 "STTCore",
                 "STTElevenLabs",
+                "STTApple",
                 "STTMockProvider",
                 "Hotkey",
                 "Injector",
@@ -50,6 +51,11 @@ let package = Package(
             name: "STTElevenLabs",
             dependencies: ["Core", "STTCore"],
             path: "Sources/STTElevenLabs"
+        ),
+        .target(
+            name: "STTApple",
+            dependencies: ["Core", "STTCore"],
+            path: "Sources/STTApple"
         ),
         .target(
             name: "STTMockProvider",
@@ -127,6 +133,11 @@ let package = Package(
             name: "STTElevenLabsTests",
             dependencies: ["STTElevenLabs"],
             path: "Tests/STTElevenLabsTests"
+        ),
+        .testTarget(
+            name: "STTAppleTests",
+            dependencies: ["STTApple"],
+            path: "Tests/STTAppleTests"
         ),
         .testTarget(
             name: "OrchestratorTests",

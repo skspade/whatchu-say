@@ -63,13 +63,13 @@ struct StatusItemMenuBuilderTests {
 
     // MARK: - Always-present items
 
-    @Test("idle, no error: status header + Update API Key + section headers + Quit")
+    @Test("idle, no error: status header + ElevenLabs key action + section headers + Quit")
     func idleEmptyHasBaseItems() {
         let controller = makeController()
         let items = controller.makeMenuItems()
         let allTitles = titles(of: items)
         #expect(allTitles.contains("Idle"))
-        #expect(allTitles.contains("Update API Key…"))
+        #expect(allTitles.contains("Update ElevenLabs API Key…"))
         #expect(allTitles.contains("Recent Transcripts"))
         #expect(allTitles.contains("Recent Errors"))
         #expect(allTitles.contains("No recent transcripts"))
@@ -119,15 +119,22 @@ struct StatusItemMenuBuilderTests {
         let controller = makeController(status: .needsSetup)
         let titles = titles(of: controller.makeMenuItems())
         #expect(titles.contains("Set ElevenLabs API Key…"))
-        #expect(!titles.contains("Update API Key…"))
+        #expect(!titles.contains("Update ElevenLabs API Key…"))
     }
 
-    @Test("listening uses 'Update API Key…' label and 'Listening…' header")
+    @Test("listening uses ElevenLabs key label and Listening header")
     func listeningLabelling() {
         let controller = makeController(status: .listening)
         let titles = titles(of: controller.makeMenuItems())
         #expect(titles.contains("Listening…"))
-        #expect(titles.contains("Update API Key…"))
+        #expect(titles.contains("Update ElevenLabs API Key…"))
+    }
+
+    @Test("preparing provider surfaces its status header")
+    func preparingProviderHeader() {
+        let controller = makeController(status: .preparingProvider)
+        let titles = titles(of: controller.makeMenuItems())
+        #expect(titles.contains("Preparing provider…"))
     }
 
     @Test("startupFailed surfaces the failure message in the header")
@@ -264,7 +271,7 @@ struct StatusItemMenuBuilderTests {
         #expect(items.count >= 4)
         #expect(items[0].title == "Idle")
         #expect(items[1].isSeparatorItem)
-        #expect(items[2].title == "Update API Key…")
+        #expect(items[2].title == "Update ElevenLabs API Key…")
         #expect(items[3].isSeparatorItem)
     }
 

@@ -35,6 +35,9 @@ public enum LanguageSupport: Sendable {
     case specific([String])
     case auto
     case multi
+    /// The supported languages depend on the operating system, installed
+    /// assets, and hardware. Query the provider for the current device list.
+    case deviceSupported
 }
 
 public extension SttProvider {
