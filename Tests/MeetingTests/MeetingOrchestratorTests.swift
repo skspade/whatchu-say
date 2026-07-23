@@ -52,8 +52,8 @@ struct MeetingOrchestratorTests {
         let id = try await orch.start(attendees: AttendeeList(names: []), keepAudio: false)
         let micURL = try lib.micFile(for: id)
         let systemURL = try lib.systemFile(for: id)
-        try Data().write(to: micURL)
-        try Data().write(to: systemURL)
+        try Data([0x01]).write(to: micURL)
+        try Data([0x01]).write(to: systemURL)
         await mock.setResponse(.init(segments: []), for: micURL)
         await mock.setResponse(.init(segments: [
             .init(start: 0, end: 1, speakerId: 0, text: "hi"),
@@ -81,8 +81,8 @@ struct MeetingOrchestratorTests {
         let id = try await orch.start(attendees: AttendeeList(names: []), keepAudio: false)
         let micURL = try lib.micFile(for: id)
         let systemURL = try lib.systemFile(for: id)
-        try Data().write(to: micURL)
-        try Data().write(to: systemURL)
+        try Data([0x01]).write(to: micURL)
+        try Data([0x01]).write(to: systemURL)
         await mock.setResponse(.init(segments: []), for: micURL)
         await mock.setResponse(.init(segments: []), for: systemURL)
         try await orch.stop()
@@ -105,8 +105,8 @@ struct MeetingOrchestratorTests {
         let id = try await orch.start(attendees: AttendeeList(names: []), keepAudio: false)
         let micURL = try lib.micFile(for: id)
         let systemURL = try lib.systemFile(for: id)
-        try Data().write(to: micURL)
-        try Data().write(to: systemURL)
+        try Data([0x01]).write(to: micURL)
+        try Data([0x01]).write(to: systemURL)
         await #expect(throws: Error.self) {
             try await orch.stop()
         }
@@ -115,6 +115,30 @@ struct MeetingOrchestratorTests {
         if case .failed = session.status {} else {
             Issue.record("expected .failed status, got \(session.status)")
         }
+    }
+
+    @Test("stop marks session failed when nothing was recorded")
+    func failsOnEmptyRecording() async throws {
+        let (lib, root) = try makeLibrary()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let mock = MockBatchTranscriber()
+        let orch = MeetingOrchestrator(
+            library: lib,
+            micRecorderFactory: { _ in MockAudioRecorder() },
+            systemRecorderFactory: { _ in MockAudioRecorder() },
+            transcriber: mock,
+            mapper: ContentBasedSpeakerNameMapper()
+        )
+        // Mock recorders never write audio, so both tracks are empty.
+        let id = try await orch.start(attendees: AttendeeList(names: []), keepAudio: false)
+        await #expect(throws: MeetingError.emptyRecording) {
+            try await orch.stop()
+        }
+        let session = try lib.load(id: id)
+        if case .failed = session.status {} else {
+            Issue.record("expected .failed status, got \(session.status)")
+        }
+        #expect(await mock.callCount == 0)
     }
 
     @Test("recover transcribes a half-written session")
@@ -127,8 +151,8 @@ struct MeetingOrchestratorTests {
         _ = try lib.create(session: session)
         let micURL = try lib.micFile(for: session.id)
         let systemURL = try lib.systemFile(for: session.id)
-        try Data().write(to: micURL)
-        try Data().write(to: systemURL)
+        try Data([0x01]).write(to: micURL)
+        try Data([0x01]).write(to: systemURL)
         await mock.setResponse(.init(segments: []), for: micURL)
         await mock.setResponse(.init(segments: [
             .init(start: 0, end: 1, speakerId: 0, text: "hi"),

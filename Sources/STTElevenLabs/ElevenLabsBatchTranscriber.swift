@@ -48,7 +48,7 @@ public struct ElevenLabsBatchTranscriber: BatchTranscriber {
 
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(audioFileURL.lastPathComponent)\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: audio/ogg\r\n\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(Self.contentType(for: audioFileURL.pathExtension))\r\n\r\n".data(using: .utf8)!)
         body.append(try Data(contentsOf: audioFileURL))
         body.append("\r\n".data(using: .utf8)!)
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
@@ -61,6 +61,20 @@ public struct ElevenLabsBatchTranscriber: BatchTranscriber {
         }
 
         return try Self.parse(data)
+    }
+
+    /// Maps an audio file extension to its MIME type for the multipart upload.
+    /// Defaults to `audio/ogg` (the format the meeting recorder writes).
+    static func contentType(for pathExtension: String) -> String {
+        switch pathExtension.lowercased() {
+        case "opus", "ogg": return "audio/ogg"
+        case "wav": return "audio/wav"
+        case "caf": return "audio/x-caf"
+        case "m4a", "mp4": return "audio/mp4"
+        case "flac": return "audio/flac"
+        case "mp3": return "audio/mpeg"
+        default: return "audio/ogg"
+        }
     }
 
     static func parse(_ data: Data) throws -> BatchTranscriptionResult {

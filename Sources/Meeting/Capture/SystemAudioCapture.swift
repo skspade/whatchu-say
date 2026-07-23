@@ -1,5 +1,7 @@
 #if canImport(AudioToolbox) && os(macOS)
 import Foundation
+import Core
+import OSLog
 import CoreAudio
 import AudioToolbox
 @preconcurrency import AVFoundation
@@ -7,6 +9,7 @@ import AudioToolbox
 @available(macOS 15, *)
 public actor SystemAudioCapture: AudioRecorderProtocol {
     private let outputURL: URL
+    private let log = AppLogger.logger(for: .audio)
     private var tapId: AudioObjectID = 0
     private var aggregateId: AudioObjectID = 0
     private var engine: AVAudioEngine?
@@ -52,12 +55,21 @@ public actor SystemAudioCapture: AudioRecorderProtocol {
         let input = engine.inputNode
         try input.auAudioUnit.setDeviceID(agg)
         let inputFormat = input.inputFormat(forBus: 0)
-        let writer = try OpusFileWriter(url: outputURL, sampleRate: inputFormat.sampleRate)
+        let writer = try OpusFileWriter(url: outputURL)
         self.engine = engine
         self.writer = writer
 
-        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
-            Task { await self?.handle(buffer: buffer) }
+        // Write synchronously on the tap's serial thread: the buffer is only
+        // valid for the callback, and serial writes preserve frame order.
+        let log = self.log
+        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
+            do {
+                try writer.append(buffer: buffer)
+            } catch {
+                if writer.registerFailure() {
+                    log.error("Meeting system audio write failed; recording may be empty: \(String(describing: error), privacy: .public)")
+                }
+            }
         }
         try engine.start()
     }
@@ -66,6 +78,9 @@ public actor SystemAudioCapture: AudioRecorderProtocol {
         engine?.inputNode.removeTap(onBus: 0)
         engine?.stop()
         engine = nil
+        if let writer, writer.writeFailureCount > 0 {
+            log.error("Meeting system recording finished with \(writer.writeFailureCount, privacy: .public) failed audio buffers")
+        }
         try? writer?.close()
         writer = nil
         if aggregateId != 0 {
@@ -76,10 +91,6 @@ public actor SystemAudioCapture: AudioRecorderProtocol {
             AudioHardwareDestroyProcessTap(tapId)
             tapId = 0
         }
-    }
-
-    private func handle(buffer: AVAudioPCMBuffer) {
-        try? writer?.append(buffer: buffer)
     }
 }
 
