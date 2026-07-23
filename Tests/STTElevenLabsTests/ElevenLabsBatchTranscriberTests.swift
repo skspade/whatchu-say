@@ -107,6 +107,35 @@ struct ElevenLabsBatchTranscriberTests {
         #expect(bodyText.contains("\r\n\r\ntrue\r\n"))
     }
 
+    @Test("contentType maps extensions to MIME types")
+    func contentTypeMapping() {
+        #expect(ElevenLabsBatchTranscriber.contentType(for: "caf") == "audio/x-caf")
+        #expect(ElevenLabsBatchTranscriber.contentType(for: "opus") == "audio/ogg")
+        #expect(ElevenLabsBatchTranscriber.contentType(for: "ogg") == "audio/ogg")
+        #expect(ElevenLabsBatchTranscriber.contentType(for: "wav") == "audio/wav")
+        #expect(ElevenLabsBatchTranscriber.contentType(for: "CAF") == "audio/x-caf")
+        #expect(ElevenLabsBatchTranscriber.contentType(for: "unknown") == "audio/ogg")
+    }
+
+    @Test("upload sets Content-Type from the file extension")
+    func contentTypeFromExtension() async throws {
+        let json = #"{"segments": []}"#.data(using: .utf8)!
+        StubURLProtocol.stubbedResponse = (json, HTTPURLResponse(url: URL(string: "https://x")!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        StubURLProtocol.lastRequestBody = nil
+
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("mic.caf")
+        try Data([0x01]).write(to: tmp)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let t = ElevenLabsBatchTranscriber(apiKey: "key", urlSession: makeSession())
+        _ = try await t.transcribe(audioFileURL: tmp, diarize: false, languageHint: nil)
+
+        let body = try #require(StubURLProtocol.lastRequestBody)
+        let bodyText = try #require(String(data: body, encoding: .utf8))
+        #expect(bodyText.contains("Content-Type: audio/x-caf"))
+        #expect(!bodyText.contains("Content-Type: audio/ogg"))
+    }
+
     @Test("noVerbatim=false omits the no_verbatim multipart field")
     func noVerbatimFieldOmittedByDefault() async throws {
         let json = #"{"segments": []}"#.data(using: .utf8)!

@@ -37,12 +37,15 @@ public struct MeetingLibrary: MeetingLibraryProtocol {
         rootDirectory.appendingPathComponent(id.uuidString, isDirectory: true)
     }
 
+    // Opus audio in a CAF container. AVAudioFile cannot write an Ogg (.opus)
+    // container on macOS — it produces zero-byte files — but CAF holds the same
+    // Opus codec and writes correctly.
     public func micFile(for id: UUID) throws -> URL {
-        try directory(for: id).appendingPathComponent("mic.opus")
+        try directory(for: id).appendingPathComponent("mic.caf")
     }
 
     public func systemFile(for id: UUID) throws -> URL {
-        try directory(for: id).appendingPathComponent("system.opus")
+        try directory(for: id).appendingPathComponent("system.caf")
     }
 
     public func create(session: MeetingSession) throws -> URL {
@@ -74,9 +77,7 @@ public struct MeetingLibrary: MeetingLibraryProtocol {
     }
 
     public func deleteAudio(for id: UUID) throws {
-        let dir = try directory(for: id)
-        for name in ["mic.opus", "system.opus"] {
-            let url = dir.appendingPathComponent(name)
+        for url in [try micFile(for: id), try systemFile(for: id)] {
             if FileManager.default.fileExists(atPath: url.path) {
                 try FileManager.default.removeItem(at: url)
             }

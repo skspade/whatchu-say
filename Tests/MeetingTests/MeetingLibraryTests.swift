@@ -46,18 +46,20 @@ struct MeetingLibraryTests {
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("transcript.md").path))
     }
 
-    @Test("deleteAudio removes mic.opus and system.opus only")
+    @Test("deleteAudio removes mic and system audio only")
     func deleteAudio() throws {
         let (lib, root) = try makeTempLibrary()
         defer { try? FileManager.default.removeItem(at: root) }
         let s = MeetingSession(id: UUID(), title: "x", startedAt: Date(), attendees: AttendeeList(names: []), keepAudio: false)
         let dir = try lib.create(session: s)
-        try Data().write(to: dir.appendingPathComponent("mic.opus"))
-        try Data().write(to: dir.appendingPathComponent("system.opus"))
+        let micURL = try lib.micFile(for: s.id)
+        let systemURL = try lib.systemFile(for: s.id)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
         try Data().write(to: dir.appendingPathComponent("meta.json"))
         try lib.deleteAudio(for: s.id)
-        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("mic.opus").path))
-        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("system.opus").path))
+        #expect(!FileManager.default.fileExists(atPath: micURL.path))
+        #expect(!FileManager.default.fileExists(atPath: systemURL.path))
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("meta.json").path))
     }
 }
