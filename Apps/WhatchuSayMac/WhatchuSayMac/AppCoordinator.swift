@@ -8,7 +8,6 @@ import Meeting
 import Orchestrator
 import PlatformApple
 import STTCore
-import STTElevenLabs
 import Usage
 
 /// MainActor-isolated, observable status backing the menu-bar UI.
@@ -18,6 +17,7 @@ final class AppState {
     enum Status: Equatable {
         case idle
         case listening
+        case preparingProvider
         case needsSetup
         case startupFailed(String)
     }
@@ -54,7 +54,8 @@ final class AppCoordinator {
     private var started = false
 
     init(
-        apiKey: String,
+        dictationProvider: any SttProvider,
+        meetingTranscriber: (any BatchTranscriber)?,
         state: AppState,
         configStore: ConfigStore,
         recentTranscripts: RecentTranscriptsStore,
@@ -64,12 +65,10 @@ final class AppCoordinator {
         self.recentTranscripts = recentTranscripts
         self.errorLog = errorLog
 
-        // Snapshot the current config — these subsystems consume plain values,
-        // not the store itself. Live-reconfig wiring lands when the Settings
-        // panes ship (per docs/PLAN_SETTINGS.md §6 step 9 onward).
+        // Snapshot the current config — provider changes rebuild this
+        // coordinator through the explicit Apply Provider Settings action.
         let appConfig = configStore.config
 
-        let provider = ElevenLabsProvider(apiKey: apiKey, noVerbatim: appConfig.provider.noVerbatim)
         let selector = StrategySelector(
             defaultStrategy: appConfig.injection.defaultStrategy,
             typeMaxChars: Int(appConfig.injection.typeMaxCharsForAuto),
@@ -86,7 +85,7 @@ final class AppCoordinator {
         let audio = AVAudioCapture()
         self.audio = audio
         self.orchestrator = Orchestrator(
-            provider: provider,
+            provider: dictationProvider,
             injector: injector,
             stateMachine: stateMachine,
             usage: usage,
@@ -112,11 +111,18 @@ final class AppCoordinator {
             await orchestrator.handleAudioInterruption()
         }
 
-        do {
-            self.meetingsCoordinator = try MeetingsCoordinator(apiKey: apiKey, configStore: configStore)
-        } catch {
+        if let meetingTranscriber {
+            do {
+                self.meetingsCoordinator = try MeetingsCoordinator(
+                    transcriber: meetingTranscriber,
+                    configStore: configStore
+                )
+            } catch {
+                self.meetingsCoordinator = nil
+                state.lastError = "Meeting transcription unavailable: \(error)"
+            }
+        } else {
             self.meetingsCoordinator = nil
-            state.lastError = "Meeting transcription unavailable: \(error)"
         }
     }
 
@@ -220,7 +226,7 @@ final class AppCoordinator {
     /// through the menu.
     static func applyToAppState(_ event: OrchestratorEvent, state: AppState) {
         switch state.status {
-        case .startupFailed, .needsSetup: return
+        case .startupFailed, .needsSetup, .preparingProvider: return
         default: break
         }
         switch event {

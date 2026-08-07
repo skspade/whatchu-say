@@ -64,8 +64,11 @@ Swift binaries are heavier than Rust binaries (~25 MB Swift runtime baseline vs.
             │  └──────────┘ └────────────┘ └──────────────┘  │
             │                                                 │
             │  ┌─────────────────┐ ┌──────────────────┐      │
-            │  │ STTElevenLabs   │ │ STTMockProvider  │      │
+            │  │ STTElevenLabs   │ │    STTApple      │      │
             │  └─────────────────┘ └──────────────────┘      │
+            │  ┌─────────────────┐                            │
+            │  │ STTMockProvider │                            │
+            │  └─────────────────┘                            │
             │                                                 │
             │  ┌────────────────────────┐ ┌───────────────┐  │
             │  │ PlatformApple/Mac      │ │ Apple/iOS     │  │
@@ -125,6 +128,10 @@ whatchu-say/
 │   │   └── Protocol/
 │   │       ├── ClientMessages.swift
 │   │       └── ServerMessages.swift
+│   │
+│   ├── STTApple/                    # Apple SpeechAnalyzer adapter (macOS/iOS/visionOS 26+)
+│   │   ├── AppleSpeechProvider.swift
+│   │   └── AppleSpeechSession.swift
 │   │
 │   ├── STTMockProvider/            # For tests + provider-abstraction validation
 │   │   └── MockProvider.swift
@@ -287,7 +294,37 @@ Providers often have expensive per-process setup (auth handshake, model warm-up)
 | Server events | JSON, mapped to `SttEvent` enum |
 | Heartbeat | If protocol requires keepalive, handled inside the adapter |
 
-### 4.4 Future adapters (sketches)
+### 4.4 Apple SpeechAnalyzer adapter
+
+`STTApple` is the default on-device option on macOS 26+. It consumes the same
+16 kHz mono signed-Int16 frames as `AVAudioCapture`, so the capture pipeline
+and `Orchestrator` do not change. Before the coordinator accepts a dictation
+hotkey, `AppleSpeechProvider.prepare` resolves the requested locale, downloads
+its SpeechAnalyzer asset when needed, and verifies that Apple accepts that
+format.
+
+Each session runs two `SpeechTranscriber` modules under one `SpeechAnalyzer`:
+
+- `.progressiveTranscription` emits non-final results as normalized
+  `SttEvent.partial` values for the HUD.
+- `.transcriptionWithAlternatives` emits committed results as
+  `SttEvent.final` values. Keeping this stream separate avoids losing text
+  when Apple's volatile progressive result is not reissued as final.
+
+The provider is selected explicitly in Settings and requires no API key. Its
+language menu is populated from `SpeechTranscriber.supportedLocales`; selecting
+System Language follows the current system locale. The shared hints list is
+passed to `AnalysisContext.contextualStrings` as contextual terms. Apple does
+not offer an equivalent to ElevenLabs filler-word removal, so that setting is
+hidden while Apple Speech is selected. Apple Speech availability and asset
+support are device- and locale-dependent; setup errors keep the existing
+coordinator running when a settings change cannot be prepared.
+
+Apple's transcriber performs dictation on device and does not send dictation
+audio to Apple. The app still includes `NSSpeechRecognitionUsageDescription`
+because it links the Speech framework.
+
+### 4.5 Future adapters (sketches)
 
 - `STTDeepgram` — WebSocket, similar shape, supports keyword boost natively.
 - `STTOpenAIRealtime` — WebSocket, audio in Opus encoding (adapter handles encode).
@@ -656,7 +693,7 @@ public struct AppConfig: Codable, Sendable {
 }
 
 public struct ProviderConfig: Codable, Sendable {
-    public var providerName: String          // "elevenlabs"
+    public var providerName: String          // "elevenlabs" or "apple"
     public var model: String?
     public var language: String?
     public var hints: [String]
@@ -1050,7 +1087,7 @@ Sibling subsystem to dictation. Captures mic + Mac system audio for the duration
 Full design: [`docs/superpowers/specs/2026-05-02-meeting-transcription-design.md`](./superpowers/specs/2026-05-02-meeting-transcription-design.md). Implementation plan: [`docs/superpowers/plans/2026-05-02-meeting-transcription.md`](./superpowers/plans/2026-05-02-meeting-transcription.md).
 
 - **Capture API**: Core Audio Process Tap (`CATapDescription` + `AudioHardwareCreateProcessTap` + aggregate device), gated `@available(macOS 15, *)`. ScreenCaptureKit is the documented fallback.
-- **STT provider**: ElevenLabs Scribe v2 batch. `STTCore` exposes a new `BatchTranscriber` capability protocol; `STTElevenLabs` implements it. Realtime path used by dictation is unchanged.
+- **STT provider**: ElevenLabs Scribe v2 batch. `STTCore` exposes a new `BatchTranscriber` capability protocol; `STTElevenLabs` implements it. Meeting transcription remains independent of the selected realtime dictation provider, so selecting Apple Speech still requires an ElevenLabs key for meeting transcription and diarization.
 - **Pipeline**: mic → Scribe v2 (no diarization, relabeled `me`) ‖ system → Scribe v2 (diarized, `Speaker N`); merge by timestamp; content-based name mapping over user-entered attendees.
 - **Trigger**: pure-manual menu-bar action with consent reminder + optional attendee chip input. No detection, no calendar OAuth.
 - **Surface**: post-meeting transcript window (no live captions). Menu bar shows recording state with elapsed timer + Stop button.

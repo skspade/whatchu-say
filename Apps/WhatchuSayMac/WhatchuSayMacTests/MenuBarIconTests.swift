@@ -40,6 +40,11 @@ struct MenuBarIconTests {
         #expect(iconName(for: state) == "mic.fill")
     }
 
+    @Test("preparing provider: progress icon")
+    func preparingProviderIcon() {
+        #expect(iconName(for: make(status: .preparingProvider)) == "arrow.triangle.2.circlepath")
+    }
+
     @Test("needsSetup: key icon")
     func needsSetupIcon() {
         #expect(iconName(for: make(status: .needsSetup)) == "key.fill")
@@ -73,6 +78,11 @@ struct MenuBarIconTests {
     func listeningWithErrorTint() {
         let state = make(status: .listening, lastError: "boom")
         #expect(iconTint(for: state) == .yellow)
+    }
+
+    @Test("preparing provider: yellow")
+    func preparingProviderTint() {
+        #expect(iconTint(for: make(status: .preparingProvider)) == .yellow)
     }
 
     @Test("needsSetup: yellow")

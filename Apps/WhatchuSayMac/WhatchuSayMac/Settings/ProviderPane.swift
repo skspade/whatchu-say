@@ -1,53 +1,65 @@
 import SwiftUI
 import Core
+import STTApple
 
 struct ProviderPane: View {
     let store: ConfigStore
     let apiKeys: APIKeyController
+    let applyProviderConfiguration: () async -> Void
 
     @State private var apiKeyInput: String = ""
     @State private var showKey = false
     @State private var isSaving = false
     @State private var saveError: String?
+    @State private var isApplyingProvider = false
+    @State private var appleLanguages: [String] = []
+    @State private var isLoadingAppleLanguages = false
 
     @State private var newHint: String = ""
     @State private var hintError: String?
 
-    /// ElevenLabs realtime caps: 50 terms, 20 chars each.
+    /// ElevenLabs realtime caps: 50 terms, 20 chars each. Keep the shared
+    /// config within these limits so a user can switch back without edits.
     private static let maxHints = 50
     private static let maxHintLength = 20
 
     var body: some View {
         Form {
             Section("Provider") {
-                Picker("Service", selection: store.binding(for: \.provider.providerName)) {
+                Picker("Service", selection: providerNameBinding) {
                     ForEach(ProviderRegistry.known, id: \.identifier) { info in
                         Text(info.displayName).tag(info.identifier)
                     }
                 }
 
-                TextField(
-                    "Model",
-                    text: optionalStringBinding(\.provider.model),
-                    prompt: Text("Default")
-                )
+                if isAppleSpeech {
+                    appleLanguagePicker
+                } else {
+                    TextField(
+                        "Model",
+                        text: optionalStringBinding(\.provider.model),
+                        prompt: Text("Default")
+                    )
 
-                TextField(
-                    "Language",
-                    text: optionalStringBinding(\.provider.language),
-                    prompt: Text("Auto-detect")
-                )
+                    TextField(
+                        "Language",
+                        text: optionalStringBinding(\.provider.language),
+                        prompt: Text("Auto-detect")
+                    )
+                }
             }
 
-            Section {
-                Toggle(
-                    "Remove filler words",
-                    isOn: store.binding(for: \.provider.noVerbatim)
-                )
-            } footer: {
-                Text("Asks ElevenLabs to strip filler words (\u{201C}um\u{201D}, \u{201C}uh\u{201D}), false starts, and non-speech sounds from transcripts. Applies to dictation and meeting recordings.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if !isAppleSpeech {
+                Section {
+                    Toggle(
+                        "Remove filler words",
+                        isOn: store.binding(for: \.provider.noVerbatim)
+                    )
+                } footer: {
+                    Text("Asks ElevenLabs to strip filler words (\u{201C}um\u{201D}, \u{201C}uh\u{201D}), false starts, and non-speech sounds from transcripts. Applies to dictation and meeting recordings.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section {
@@ -62,12 +74,16 @@ struct ProviderPane: View {
                         .monospacedDigit()
                 }
             } footer: {
-                Text("Bias the model toward specific words — useful for product names, technical jargon, and proper nouns. Up to \(Self.maxHints) terms, \(Self.maxHintLength) characters each.")
+                Text(hintsFooter)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Section("API key") {
+            Section(apiKeySectionTitle) {
+                Text(apiKeyPurpose)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 if let suffix = apiKeys.savedKeySuffix {
                     LabeledContent("Saved key", value: "••••\(suffix)")
                 } else {
@@ -99,13 +115,29 @@ struct ProviderPane: View {
             }
 
             Section {
-                Text("Provider settings (model, language, hints) take effect on the next coordinator restart — saving a new API key is the easiest trigger.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Button(isApplyingProvider ? "Applying…" : "Apply Provider Settings") {
+                        applyProvider()
+                    }
+                    .disabled(isApplyingProvider)
+
+                    if isAppleSpeech {
+                        Text("Apple Speech downloads the selected language model when needed.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Restarts dictation with the current provider settings.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         .formStyle(.grouped)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task(id: store.config.provider.providerName) {
+            await loadAppleLanguagesIfNeeded()
+        }
     }
 
     // MARK: - Subviews
@@ -118,6 +150,26 @@ struct ProviderPane: View {
         } else {
             SecureField("API key", text: $apiKeyInput, prompt: Text("Paste your key"))
                 .textFieldStyle(.roundedBorder)
+        }
+    }
+
+    @ViewBuilder
+    private var appleLanguagePicker: some View {
+        if isLoadingAppleLanguages {
+            LabeledContent("Language") {
+                ProgressView()
+                    .controlSize(.small)
+            }
+        } else if appleLanguages.isEmpty {
+            LabeledContent("Language", value: "No supported languages found")
+                .foregroundStyle(.secondary)
+        } else {
+            Picker("Language", selection: appleLanguageBinding) {
+                Text("System Language").tag("")
+                ForEach(appleLanguages, id: \.self) { identifier in
+                    Text(localeLabel(for: identifier)).tag(identifier)
+                }
+            }
         }
     }
 
@@ -168,6 +220,14 @@ struct ProviderPane: View {
         }
     }
 
+    private func applyProvider() {
+        isApplyingProvider = true
+        Task { @MainActor in
+            defer { isApplyingProvider = false }
+            await applyProviderConfiguration()
+        }
+    }
+
     // MARK: - Button state
 
     private var saveButtonTitle: String {
@@ -187,6 +247,28 @@ struct ProviderPane: View {
             || apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var isAppleSpeech: Bool {
+        store.config.provider.providerName == ProviderRegistry.apple.identifier
+    }
+
+    private var apiKeySectionTitle: String {
+        isAppleSpeech ? "ElevenLabs API key (meetings)" : "ElevenLabs API key"
+    }
+
+    private var apiKeyPurpose: String {
+        if isAppleSpeech {
+            return "Apple Speech dictation does not require a key. An ElevenLabs key enables meeting transcription and diarization."
+        }
+        return "Used for ElevenLabs dictation and meeting transcription."
+    }
+
+    private var hintsFooter: String {
+        if isAppleSpeech {
+            return "Passed to Apple Speech as contextual terms. Use short product names, technical jargon, and proper nouns."
+        }
+        return "Bias the model toward specific words — useful for product names, technical jargon, and proper nouns. Up to \(Self.maxHints) terms, \(Self.maxHintLength) characters each."
+    }
+
     // MARK: - Bindings
 
     /// Bridge `String?` config field to `TextField`'s `Binding<String>`.
@@ -201,6 +283,42 @@ struct ProviderPane: View {
                 store.update { $0[keyPath: keyPath] = trimmed.isEmpty ? nil : trimmed }
             }
         )
+    }
+
+    private var providerNameBinding: Binding<String> {
+        Binding(
+            get: { store.config.provider.providerName },
+            set: { providerName in
+                store.update { $0.provider.providerName = providerName }
+            }
+        )
+    }
+
+    private var appleLanguageBinding: Binding<String> {
+        Binding(
+            get: { store.config.provider.language ?? "" },
+            set: { identifier in
+                store.update {
+                    $0.provider.language = identifier.isEmpty ? nil : identifier
+                }
+            }
+        )
+    }
+
+    private func loadAppleLanguagesIfNeeded() async {
+        guard isAppleSpeech else { return }
+        guard #available(macOS 26.0, *) else {
+            appleLanguages = []
+            return
+        }
+
+        isLoadingAppleLanguages = true
+        appleLanguages = await AppleSpeechProvider.supportedLanguages()
+        isLoadingAppleLanguages = false
+    }
+
+    private func localeLabel(for identifier: String) -> String {
+        Locale(identifier: identifier).localizedString(forIdentifier: identifier) ?? identifier
     }
 
     // MARK: - Hints editor

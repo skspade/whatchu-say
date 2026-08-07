@@ -14,6 +14,7 @@ import SwiftUI
 func iconName(for state: AppState) -> String {
     switch state.status {
     case .listening:      return "mic.fill"
+    case .preparingProvider: return "arrow.triangle.2.circlepath"
     case .needsSetup:     return "key.fill"
     case .startupFailed:  return "exclamationmark.triangle.fill"
     case .idle:
@@ -23,7 +24,7 @@ func iconName(for state: AppState) -> String {
 
 func iconTint(for state: AppState) -> Color {
     switch state.status {
-    case .needsSetup, .startupFailed:
+    case .preparingProvider, .needsSetup, .startupFailed:
         return .yellow
     case .idle, .listening:
         return state.lastError == nil ? .primary : .yellow
@@ -36,7 +37,7 @@ func iconTint(for state: AppState) -> Color {
 /// `iconTint(for:)` so the two cannot drift.
 func iconTintColor(for state: AppState) -> NSColor? {
     switch state.status {
-    case .needsSetup, .startupFailed:
+    case .preparingProvider, .needsSetup, .startupFailed:
         return .systemYellow
     case .idle, .listening:
         return state.lastError == nil ? nil : .systemYellow
@@ -47,6 +48,7 @@ func statusLabel(for state: AppState) -> String {
     switch state.status {
     case .idle:                       return "Idle"
     case .listening:                  return "Listening…"
+    case .preparingProvider:          return "Preparing provider…"
     case .needsSetup:                 return "Set your ElevenLabs API key to begin"
     case .startupFailed(let message): return "Startup failed: \(message)"
     }
@@ -55,6 +57,6 @@ func statusLabel(for state: AppState) -> String {
 func setKeyMenuTitle(for state: AppState) -> String {
     switch state.status {
     case .needsSetup: return "Set ElevenLabs API Key…"
-    default:          return "Update API Key…"
+    default:          return "Update ElevenLabs API Key…"
     }
 }

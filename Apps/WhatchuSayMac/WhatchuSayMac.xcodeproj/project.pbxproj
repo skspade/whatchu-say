@@ -405,6 +405,7 @@
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = " Whatchu-Say uses the microphone for dictation";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Whatchu-Say transcribes your speech for dictation.";
 				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Whatchu-Say records meeting audio from other apps so it can be transcribed.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -442,6 +443,7 @@
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = " Whatchu-Say uses the microphone for dictation";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Whatchu-Say transcribes your speech for dictation.";
 				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Whatchu-Say records meeting audio from other apps so it can be transcribed.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

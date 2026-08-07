@@ -62,21 +62,31 @@ struct DisclosureContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            disclosureLine("Audio is streamed to \(providerName) over an encrypted WebSocket while you dictate.")
-            disclosureLine("Transcripts are stored locally in `~/Library/Application Support/whatchu-say/` and never sent anywhere except your configured provider.")
-            disclosureLine("API keys are stored in macOS Keychain and never leave your machine except when authenticating with your provider.")
+            disclosureLine(dictationDisclosure)
+            disclosureLine("Transcripts are stored locally in `~/Library/Application Support/whatchu-say/`.")
+            disclosureLine("If you use meeting transcription, recordings are sent to ElevenLabs over an encrypted connection for transcription and diarization. An ElevenLabs API key is required for meetings regardless of your dictation provider.")
+            disclosureLine("If configured, ElevenLabs API keys are stored in macOS Keychain and used only to authenticate with ElevenLabs.")
             disclosureLine("No usage analytics, crash reports, or telemetry are sent to whatchu-say developers.")
 
-            if let info = providerInfo {
-                Link("\(info.displayName) data-handling policy", destination: info.dataPolicyURL)
+            if let info = providerInfo, let dataPolicyURL = info.dataPolicyURL {
+                Link("\(info.displayName) data-handling policy", destination: dataPolicyURL)
                     .font(.callout)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var providerName: String {
-        providerInfo?.displayName ?? "your provider"
+    private var dictationDisclosure: String {
+        guard let providerInfo else {
+            return "Dictation audio is handled by your configured provider."
+        }
+
+        switch providerInfo.dictationDataHandling {
+        case .onDevice:
+            return "Dictation audio is processed on this Mac by \(providerInfo.displayName) and is not sent to Apple for transcription."
+        case .remote:
+            return "Dictation audio is streamed to \(providerInfo.displayName) over an encrypted WebSocket while you dictate."
+        }
     }
 
     private func disclosureLine(_ text: String) -> some View {

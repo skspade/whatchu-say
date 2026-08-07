@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import Core
 import PlatformApple
+import STTCore
 
 @main
 struct WhatchuSayMacApp: App {
@@ -28,13 +29,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let configStore = ConfigStore()
     lazy var apiKeys: APIKeyController = APIKeyController(
         keychain: keychain,
-        providerName: provider,
+        providerName: elevenLabsProvider,
         onKeySaved: { [weak self] newKey in
-            await self?.bringUpCoordinator(apiKey: newKey)
+            guard let self else { return }
+            self.currentKey = newKey
+            await self.reloadCoordinator()
         }
     )
     private let keychain = KeychainAPIKeyStore()
-    private let provider = "elevenlabs"
+    private let elevenLabsProvider = ProviderRegistry.elevenlabs.identifier
     private var coordinator: AppCoordinator?
     private var statusItemController: StatusItemController?
     private var settingsWindow: NSWindow?
@@ -105,7 +108,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let controller = NSHostingController(
-            rootView: SettingsView(store: configStore, apiKeys: apiKeys)
+            rootView: SettingsView(
+                store: configStore,
+                apiKeys: apiKeys,
+                applyProviderConfiguration: { [weak self] in
+                    await self?.reloadCoordinator()
+                }
+            )
         )
         let window = NSWindow(contentViewController: controller)
         window.title = "WhatchuSay Settings"
@@ -142,10 +151,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemController = controller
     }
 
-    /// Resolve an API key from Keychain (preferred) or the env var
-    /// (development fallback), then bring up the coordinator. If neither
-    /// source has a key, land in `.needsSetup` and wait for the user to set
-    /// one via the menu.
+    /// Resolve an ElevenLabs key from Keychain (preferred) or the env var
+    /// (development fallback), then build the selected dictation provider.
+    /// Apple Speech dictation intentionally starts without a key; an
+    /// available ElevenLabs key only enables the separate meeting flow.
     private func bootstrap() async {
         guard coordinator == nil else { return }
 
@@ -158,13 +167,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let stored = await readStoredKey()
         let envKey = ProcessInfo.processInfo.environment["ELEVENLABS_API_KEY"]?.nonEmpty
-        guard let apiKey = stored ?? envKey else {
-            print("[WhatchuSay] no API key found; entering needsSetup")
-            state.status = .needsSetup
-            state.lastError = nil
-            return
-        }
-        await bringUpCoordinator(apiKey: apiKey)
+        currentKey = stored ?? envKey
+        await reloadCoordinator()
     }
 
     /// Show a confirm alert; on accept, wipe the recent-transcripts buffer
@@ -217,15 +221,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Coordinator lifecycle
 
-    private func bringUpCoordinator(apiKey: String) async {
+    private func reloadCoordinator() async {
+        let hadCoordinator = coordinator != nil
+        state.status = .preparingProvider
+        state.lastError = nil
+
+        let providerConfig = configStore.config.provider
+        let dictationProvider: any SttProvider
+        do {
+            dictationProvider = try await ProviderFactory.makeDictationProvider(
+                config: providerConfig,
+                elevenLabsAPIKey: currentKey
+            )
+        } catch ProviderFactory.Error.missingElevenLabsAPIKey {
+            if !hadCoordinator {
+                state.status = .needsSetup
+                state.lastError = nil
+            } else {
+                state.status = .idle
+                state.lastError = ProviderFactory.Error.missingElevenLabsAPIKey.localizedDescription
+            }
+            return
+        } catch {
+            let message = error.localizedDescription
+            if !hadCoordinator {
+                state.status = .startupFailed(message)
+            } else {
+                state.status = .idle
+            }
+            state.lastError = message
+            errorLog.record(text: "Provider setup failed: \(message)")
+            return
+        }
+
+        let meetingTranscriber = ProviderFactory.makeMeetingTranscriber(
+            elevenLabsAPIKey: currentKey,
+            providerConfig: providerConfig
+        )
+        await bringUpCoordinator(
+            dictationProvider: dictationProvider,
+            meetingTranscriber: meetingTranscriber
+        )
+    }
+
+    private func bringUpCoordinator(
+        dictationProvider: any SttProvider,
+        meetingTranscriber: (any BatchTranscriber)?
+    ) async {
         if let existing = coordinator {
             await existing.shutdown()
             coordinator = nil
             statusItemController?.meetingsCoordinator = nil
         }
-        currentKey = apiKey
         let coord = AppCoordinator(
-            apiKey: apiKey,
+            dictationProvider: dictationProvider,
+            meetingTranscriber: meetingTranscriber,
             state: state,
             configStore: configStore,
             recentTranscripts: recentTranscripts,
@@ -236,14 +286,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Optimistically clear prior errors; AppCoordinator.start() will
         // overwrite to .startupFailed if hotkey tap install fails.
         state.lastError = nil
-        if state.status == .needsSetup { state.status = .idle }
+        if state.status == .needsSetup || state.status == .preparingProvider {
+            state.status = .idle
+        }
         await coord.start()
         print("[WhatchuSay] coordinator started; awaiting hotkey events")
     }
 
     private func readStoredKey() async -> String? {
         do {
-            return try await keychain.read(provider: provider)?.nonEmpty
+            return try await keychain.read(provider: elevenLabsProvider)?.nonEmpty
         } catch {
             // Surface in the error log the user actually checks — a silent
             // print here is why a revoked-signature keychain failure looked
