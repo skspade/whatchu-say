@@ -10,9 +10,10 @@ final class StubURLProtocol: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        // URLSession hands URLProtocol the body as httpBodyStream, both for
-        // requests with httpBody and for upload(for:fromFile:), so drain it
-        // here to make the multipart payload assertable in tests.
+        // Capture whatever body URLSession hands the protocol (as
+        // httpBodyStream or httpBody). Upload-task bodies aren't guaranteed
+        // to arrive here, so multipart assertions read the staged body from
+        // `makeUpload` instead.
         if let stream = request.httpBodyStream {
             stream.open()
             var collected = Data()
@@ -198,19 +199,18 @@ struct ElevenLabsBatchTranscriberTests {
     }
 
     @Test("requests diarization and word timestamps in the multipart body")
-    func diarizationFieldsSent() async throws {
-        let json = #"{"text": "", "words": []}"#.data(using: .utf8)!
-        StubURLProtocol.stubbedResponse = (json, HTTPURLResponse(url: URL(string: "https://x")!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
-        StubURLProtocol.lastRequestBody = nil
-
+    func diarizationFieldsSent() throws {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("test.opus")
         try Data().write(to: tmp)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let t = ElevenLabsBatchTranscriber(apiKey: "key", urlSession: makeSession())
-        _ = try await t.transcribe(audioFileURL: tmp, diarize: true, languageHint: nil)
+        // Read the staged multipart body directly: a URLProtocol isn't
+        // guaranteed to see the body of an upload(for:fromFile:) task.
+        let upload = try t.makeUpload(audioFileURL: tmp, diarize: true, languageHint: nil)
+        defer { try? FileManager.default.removeItem(at: upload.bodyFileURL) }
 
-        let body = try #require(StubURLProtocol.lastRequestBody)
+        let body = try Data(contentsOf: upload.bodyFileURL)
         let bodyText = try #require(String(data: body, encoding: .utf8))
         #expect(bodyText.contains("name=\"diarize\"\r\n\r\ntrue\r\n"))
         #expect(bodyText.contains("name=\"timestamps_granularity\"\r\n\r\nword\r\n"))
@@ -231,38 +231,36 @@ struct ElevenLabsBatchTranscriberTests {
     }
 
     @Test("noVerbatim=true adds a no_verbatim multipart field")
-    func noVerbatimFieldSent() async throws {
-        let json = #"{"text": "", "words": []}"#.data(using: .utf8)!
-        StubURLProtocol.stubbedResponse = (json, HTTPURLResponse(url: URL(string: "https://x")!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
-        StubURLProtocol.lastRequestBody = nil
-
+    func noVerbatimFieldSent() throws {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("test.opus")
         try Data().write(to: tmp)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let t = ElevenLabsBatchTranscriber(apiKey: "key", urlSession: makeSession(), noVerbatim: true)
-        _ = try await t.transcribe(audioFileURL: tmp, diarize: false, languageHint: nil)
+        // Read the staged multipart body directly: a URLProtocol isn't
+        // guaranteed to see the body of an upload(for:fromFile:) task.
+        let upload = try t.makeUpload(audioFileURL: tmp, diarize: false, languageHint: nil)
+        defer { try? FileManager.default.removeItem(at: upload.bodyFileURL) }
 
-        let body = try #require(StubURLProtocol.lastRequestBody)
+        let body = try Data(contentsOf: upload.bodyFileURL)
         let bodyText = try #require(String(data: body, encoding: .utf8))
         #expect(bodyText.contains("name=\"no_verbatim\""))
         #expect(bodyText.contains("\r\n\r\ntrue\r\n"))
     }
 
     @Test("noVerbatim=false omits the no_verbatim multipart field")
-    func noVerbatimFieldOmittedByDefault() async throws {
-        let json = #"{"text": "", "words": []}"#.data(using: .utf8)!
-        StubURLProtocol.stubbedResponse = (json, HTTPURLResponse(url: URL(string: "https://x")!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
-        StubURLProtocol.lastRequestBody = nil
-
+    func noVerbatimFieldOmittedByDefault() throws {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("test.opus")
         try Data().write(to: tmp)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let t = ElevenLabsBatchTranscriber(apiKey: "key", urlSession: makeSession())
-        _ = try await t.transcribe(audioFileURL: tmp, diarize: false, languageHint: nil)
+        // Read the staged multipart body directly: a URLProtocol isn't
+        // guaranteed to see the body of an upload(for:fromFile:) task.
+        let upload = try t.makeUpload(audioFileURL: tmp, diarize: false, languageHint: nil)
+        defer { try? FileManager.default.removeItem(at: upload.bodyFileURL) }
 
-        let body = try #require(StubURLProtocol.lastRequestBody)
+        let body = try Data(contentsOf: upload.bodyFileURL)
         let bodyText = try #require(String(data: body, encoding: .utf8))
         #expect(!bodyText.contains("name=\"no_verbatim\""))
     }
