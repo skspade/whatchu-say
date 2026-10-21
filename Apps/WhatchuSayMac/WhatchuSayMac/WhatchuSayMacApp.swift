@@ -247,9 +247,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             // Surface in the error log the user actually checks — a silent
             // print here is why a revoked-signature keychain failure looked
-            // like "no key" with no explanation. `KeychainError` is
-            // CustomStringConvertible, so this carries the actionable
-            // "open Keychain Access…" guidance for the orphaned case.
+            // like "no key" with no explanation. The raw OSStatus lands in
+            // the log; the entry itself is left intact (a denied prompt or
+            // locked keychain is recoverable), and saving the key again
+            // clears an entry tied to a dead signature.
             errorLog.record(text: "Keychain read failed: \(error)")
             return nil
         }
