@@ -10,8 +10,8 @@ final class StubURLProtocol: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        // URLProtocol receives the streamed body via httpBodyStream when the
-        // request originated from URLSession with multipart data, so drain it
+        // URLSession hands URLProtocol the body as httpBodyStream, both for
+        // requests with httpBody and for upload(for:fromFile:), so drain it
         // here to make the multipart payload assertable in tests.
         if let stream = request.httpBodyStream {
             stream.open()
@@ -265,5 +265,76 @@ struct ElevenLabsBatchTranscriberTests {
         let body = try #require(StubURLProtocol.lastRequestBody)
         let bodyText = try #require(String(data: body, encoding: .utf8))
         #expect(!bodyText.contains("name=\"no_verbatim\""))
+    }
+
+    @Test("upload request carries the configured timeout, 30 minutes by default")
+    func requestTimeoutApplied() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("timeout-\(UUID().uuidString).opus")
+        try Data().write(to: tmp)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let custom = ElevenLabsBatchTranscriber(apiKey: "key", requestTimeout: 5)
+        let upload = try custom.makeUpload(audioFileURL: tmp, diarize: false, languageHint: nil)
+        defer { try? FileManager.default.removeItem(at: upload.bodyFileURL) }
+        #expect(upload.request.timeoutInterval == 5)
+
+        let standard = ElevenLabsBatchTranscriber(apiKey: "key")
+        let defaultUpload = try standard.makeUpload(audioFileURL: tmp, diarize: false, languageHint: nil)
+        defer { try? FileManager.default.removeItem(at: defaultUpload.bodyFileURL) }
+        #expect(defaultUpload.request.timeoutInterval == 30 * 60)
+    }
+
+    @Test("audio part Content-Type follows the sniffed container, then the extension")
+    func audioContentTypeMapping() {
+        let noHeader = Data()
+        #expect(ElevenLabsBatchTranscriber.audioContentType(header: noHeader, pathExtension: "opus") == "audio/ogg")
+        #expect(ElevenLabsBatchTranscriber.audioContentType(header: noHeader, pathExtension: "ogg") == "audio/ogg")
+        #expect(ElevenLabsBatchTranscriber.audioContentType(header: noHeader, pathExtension: "OPUS") == "audio/ogg")
+        #expect(ElevenLabsBatchTranscriber.audioContentType(header: noHeader, pathExtension: "caf") == "audio/x-caf")
+        #expect(ElevenLabsBatchTranscriber.audioContentType(header: noHeader, pathExtension: "wav") == "audio/wav")
+        #expect(ElevenLabsBatchTranscriber.audioContentType(header: noHeader, pathExtension: "m4a") == "audio/mp4")
+        #expect(ElevenLabsBatchTranscriber.audioContentType(header: noHeader, pathExtension: "bin") == "application/octet-stream")
+        #expect(ElevenLabsBatchTranscriber.audioContentType(header: noHeader, pathExtension: "") == "application/octet-stream")
+
+        // OpusFileWriter's PCM fallback writes CAF into the `.opus`-named file.
+        let caf = Data("caff".utf8) + Data([0, 1, 0, 0])
+        #expect(ElevenLabsBatchTranscriber.audioContentType(header: caf, pathExtension: "opus") == "audio/x-caf")
+        let ogg = Data("OggS".utf8) + Data([0, 2])
+        #expect(ElevenLabsBatchTranscriber.audioContentType(header: ogg, pathExtension: "caf") == "audio/ogg")
+        let wav = Data("RIFF".utf8) + Data([0, 0, 0, 0]) + Data("WAVE".utf8)
+        #expect(ElevenLabsBatchTranscriber.audioContentType(header: wav, pathExtension: "opus") == "audio/wav")
+        let m4a = Data([0, 0, 0, 0x20]) + Data("ftypM4A ".utf8)
+        #expect(ElevenLabsBatchTranscriber.audioContentType(header: m4a, pathExtension: "opus") == "audio/mp4")
+    }
+
+    @Test("multipart body copies the whole audio file across chunks with its sniffed type")
+    func multipartBodyStreamsAudio() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("batch-body-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // CAF bytes under an .opus name, as OpusFileWriter's PCM fallback writes.
+        let audioURL = dir.appendingPathComponent("mic.opus")
+        let audio = Data("caff".utf8) + Data((0..<10_000).map { UInt8(truncatingIfNeeded: $0) })
+        try audio.write(to: audioURL)
+
+        let bodyURL = dir.appendingPathComponent("body.multipart")
+        try ElevenLabsBatchTranscriber.writeMultipartBody(
+            to: bodyURL,
+            fields: Data("FIELDS".utf8),
+            boundary: "B",
+            audioFileURL: audioURL,
+            chunkSize: 4096
+        )
+
+        var expected = Data("FIELDS".utf8)
+        expected.append(Data("--B\r\nContent-Disposition: form-data; name=\"file\"; filename=\"mic.opus\"\r\n".utf8))
+        expected.append(Data("Content-Type: audio/x-caf\r\n\r\n".utf8))
+        expected.append(audio)
+        expected.append(Data("\r\n--B--\r\n".utf8))
+        let body = try Data(contentsOf: bodyURL)
+        #expect(body == expected)
     }
 }
