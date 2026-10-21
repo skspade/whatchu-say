@@ -460,10 +460,10 @@ final class StatusItemController: NSObject {
         configureButton(on: item)
         attachMenu(to: item)
         statusItem = item
-        // Re-arm observation: the previous closure captured a reference
-        // through `self.statusItem?.button`, so it will pick up the new
-        // button on its next fire, but we re-arm explicitly to be safe.
-        startStateObservation()
+        // Don't re-arm observation here: the existing chain re-arms itself
+        // on every change and reads `self.statusItem?.button` each time, so
+        // it already picks up the new button. Starting another chain on
+        // every wake / screen change made them pile up without bound.
     }
 }
 
