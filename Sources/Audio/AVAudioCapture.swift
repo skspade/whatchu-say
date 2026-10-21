@@ -12,18 +12,21 @@ import AudioToolbox
 /// ## Pipeline
 /// 1. `installTap` on the input bus, `tapBufferSize` samples per callback in
 ///    the device-native format.
-/// 2. The tap callback runs on a serial CoreAudio dispatch queue. We average
-///    multichannel input down to mono Float32 ourselves (so 4-mic arrays like
-///    the PS Eye contribute every capsule), then convert to mono Int16 16 kHz
-///    via a long-lived `AVAudioConverter` (safe because the converter is only
-///    touched from this serial queue).
-/// 3. The converted samples are handed to the actor via a Task so chunking,
-///    RMS computation, and stream-yielding don't block the audio thread.
+/// 2. The tap callback runs on a serial CoreAudio dispatch queue (not the
+///    realtime IO thread). We average multichannel input down to mono
+///    Float32 ourselves (so 4-mic arrays like the PS Eye contribute every
+///    capsule), then convert to mono Int16 16 kHz via a long-lived
+///    `AVAudioConverter` (safe because the converter is only touched from
+///    this serial queue).
+/// 3. Still in the callback, the samples are chunked and yielded straight
+///    into the streams (see `TapPipeline`). Handing each buffer to its own
+///    Task instead could deliver chunks to the stream out of order.
 ///
 /// ## Backpressure
-/// Both AsyncStreams use `bufferingNewest(64)` (~1.3 s of frames). If the
-/// downstream consumer falls behind, oldest frames are dropped. We never
-/// block the audio thread.
+/// The frames stream holds up to ~30 s (`bufferingNewest(1500)`) so a slow
+/// WebSocket send doesn't lose audio; if it still overflows, the oldest
+/// frames are dropped and logged. The RMS stream keeps only the newest 64
+/// levels (it drives a meter). We never block the audio thread.
 ///
 /// ## Lifecycle
 /// `start()` is idempotent (a second call while running is a no-op). `stop()`
@@ -36,23 +39,21 @@ public actor AVAudioCapture: AudioCapturing {
     private nonisolated let framesContinuation: AsyncStream<AudioFrame>.Continuation
     private nonisolated let rmsContinuation: AsyncStream<Float>.Continuation
 
-    private let rmsAnalyzer = RMSAnalyzer()
-    private nonisolated let inFlightIngest = InFlightCounter()
     private var engine: AVAudioEngine?
-    private var chunker = Chunker()
-    private var startedAt: ContinuousClock.Instant?
-    private var ingestDrainWaiter: CheckedContinuation<Void, Never>?
+    private var pipeline: TapPipeline?
 
     private static let targetSampleRate: Double = 16_000
     private static let tapBufferSize: AVAudioFrameCount = 1024
-    private static let streamBuffer: Int = 64
+    /// 30 s of 20 ms frames.
+    private static let framesBuffer: Int = 1500
+    private static let rmsBuffer: Int = 64
 
     public init() {
         let (fStream, fCont) = AsyncStream<AudioFrame>.makeStream(
-            bufferingPolicy: .bufferingNewest(Self.streamBuffer)
+            bufferingPolicy: .bufferingNewest(Self.framesBuffer)
         )
         let (rStream, rCont) = AsyncStream<Float>.makeStream(
-            bufferingPolicy: .bufferingNewest(Self.streamBuffer)
+            bufferingPolicy: .bufferingNewest(Self.rmsBuffer)
         )
         self.frames = fStream
         self.rmsLevels = rStream
@@ -144,18 +145,19 @@ public actor AVAudioCapture: AudioCapturing {
             outputFormat: outputFormat,
             monoInputFormat: monoInputFormat
         )
-        let captureRef = self
 
-        chunker.reset()
-        startedAt = .now
-
-        let counter = inFlightIngest
+        let pipeline = TapPipeline()
+        let framesContinuation = self.framesContinuation
+        let rmsContinuation = self.rmsContinuation
+        let startedAt = ContinuousClock.now
         let stats = ConversionStats()
         input.installTap(
             onBus: 0,
             bufferSize: Self.tapBufferSize,
             format: inputFormat
         ) { inputBuffer, _ in
+            guard pipeline.begin() else { return }
+            defer { pipeline.end() }
             guard let monoBuffer = Self.downmixToMono(inputBuffer: inputBuffer, monoFormat: box.monoInputFormat),
                   let outputBuffer = Self.convert(inputBuffer: monoBuffer, using: box) else {
                 let count = stats.recordFailure()
@@ -166,9 +168,16 @@ public actor AVAudioCapture: AudioCapturing {
             }
             let samples = Self.extractInt16(from: outputBuffer)
             if samples.isEmpty { return }
-            counter.increment()
-            Task {
-                await captureRef.ingest(samples: samples)
+            let timestamp = startedAt.duration(to: .now)
+            for chunk in pipeline.chunk(samples) {
+                let result = framesContinuation.yield(AudioFrame(samples: chunk, timestamp: timestamp))
+                if case .dropped = result {
+                    let count = stats.recordDrop()
+                    if count == 1 || count % 50 == 0 {
+                        print("[AVAudioCapture] frames stream full — dropped oldest frame (total: \(count)); STT send is falling behind")
+                    }
+                }
+                rmsContinuation.yield(RMSAnalyzer.level(chunk))
             }
         }
 
@@ -176,13 +185,13 @@ public actor AVAudioCapture: AudioCapturing {
             try engine.start()
         } catch {
             input.removeTap(onBus: 0)
-            startedAt = nil
             print("[AVAudioCapture] engine.start FAILED: \(error)")
             throw AudioCaptureError.engineStartFailed(String(describing: error))
         }
 
         print("[AVAudioCapture] engine started")
         self.engine = engine
+        self.pipeline = pipeline
     }
 
     public func stop() async {
@@ -191,44 +200,16 @@ public actor AVAudioCapture: AudioCapturing {
             engine.stop()
         }
         engine = nil
-        // Wait for any tap-spawned ingest Tasks to finish chunking and yielding
-        // into the frames stream BEFORE we publish the end-of-session sentinel.
-        // removeTap is synchronous, so no new ingest Tasks will be spawned past
-        // this point — the counter only goes down from here.
-        await awaitIngestDrain()
-        chunker.reset()
-        startedAt = nil
+        // A tap callback may still be running on CoreAudio's queue; wait for
+        // it so every frame of this session is in the stream BEFORE we
+        // publish the end-of-session sentinel.
+        await pipeline?.drain()
+        pipeline = nil
         // End-of-session sentinel: empty samples mark "all captured audio for
         // the just-ended session is now in the stream." Consumers (the
         // orchestrator's audio forwarder) use this to know when it's safe to
         // send `endOfStream` to the STT provider.
         framesContinuation.yield(AudioFrame(samples: [], timestamp: .zero))
-    }
-
-    /// Suspend until every in-flight ingest Task has yielded its chunks.
-    /// Resumes immediately if the counter is already at zero.
-    private func awaitIngestDrain() async {
-        if inFlightIngest.current == 0 { return }
-        await withCheckedContinuation { cont in
-            ingestDrainWaiter = cont
-        }
-    }
-
-    // MARK: - Ingest (actor-isolated)
-
-    private func ingest(samples: [Int16]) async {
-        let chunks = chunker.ingest(samples)
-        let timestamp: Duration = startedAt.map { $0.duration(to: .now) } ?? .zero
-        for chunk in chunks {
-            framesContinuation.yield(AudioFrame(samples: chunk, timestamp: timestamp))
-            let rms = await rmsAnalyzer.process(chunk)
-            rmsContinuation.yield(rms)
-        }
-        let remaining = inFlightIngest.decrement()
-        if remaining == 0, let cont = ingestDrainWaiter {
-            ingestDrainWaiter = nil
-            cont.resume()
-        }
     }
 
     // MARK: - Format conversion (runs on tap dispatch queue)
@@ -342,38 +323,71 @@ private final class SupplyState: @unchecked Sendable {
     var supplied = false
 }
 
-// Lock-protected counter shared between the audio tap (CoreAudio dispatch
-// queue, sync) and the actor's `ingest` (async). The tap increments before
-// spawning the ingest Task; ingest decrements after yielding its chunks.
-final class InFlightCounter: @unchecked Sendable {
+/// Per-capture state shared between the tap callback (CoreAudio's serial tap
+/// queue) and the actor's `stop()`. The callback chunks samples here and
+/// yields them itself, so frames reach the stream in capture order.
+/// `drain()` lets `stop()` wait out a callback that was still running when
+/// the tap was removed, so none of its frames land after the sentinel.
+final class TapPipeline: @unchecked Sendable {
     private let lock = NSLock()
-    private var count = 0
+    private var chunker = Chunker()
+    private var accepting = true
+    private var inFlight = 0
+    private var drainWaiter: CheckedContinuation<Void, Never>?
 
-    func increment() {
-        lock.lock(); defer { lock.unlock() }
-        count += 1
+    /// Call at the top of each tap callback; `false` once draining started.
+    /// A `true` result must be paired with `end()`.
+    func begin() -> Bool {
+        lock.withLock {
+            guard accepting else { return false }
+            inFlight += 1
+            return true
+        }
     }
 
-    func decrement() -> Int {
-        lock.lock(); defer { lock.unlock() }
-        count -= 1
-        return count
+    func chunk(_ samples: [Int16]) -> [[Int16]] {
+        lock.withLock { chunker.ingest(samples) }
     }
 
-    var current: Int {
-        lock.lock(); defer { lock.unlock() }
-        return count
+    func end() {
+        let waiter: CheckedContinuation<Void, Never>? = lock.withLock {
+            inFlight -= 1
+            guard inFlight == 0, let pending = drainWaiter else { return nil }
+            drainWaiter = nil
+            return pending
+        }
+        waiter?.resume()
+    }
+
+    /// Stop accepting callbacks and wait for any still running to finish.
+    func drain() async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            let idle: Bool = lock.withLock {
+                accepting = false
+                if inFlight == 0 { return true }
+                drainWaiter = cont
+                return false
+            }
+            if idle { cont.resume() }
+        }
     }
 }
 
 private final class ConversionStats: @unchecked Sendable {
     private let lock = NSLock()
     private var failures = 0
+    private var drops = 0
 
     func recordFailure() -> Int {
         lock.lock(); defer { lock.unlock() }
         failures += 1
         return failures
+    }
+
+    func recordDrop() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        drops += 1
+        return drops
     }
 }
 
