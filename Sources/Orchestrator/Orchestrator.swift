@@ -87,6 +87,18 @@ public actor Orchestrator {
     /// `insufficient_audio_activity` error (~10 s on ElevenLabs), so we tear
     /// the session down immediately instead. Cleared on session swap.
     private var partialsReceived: Bool = false
+    /// Frames on the current session (buffered or forwarded) loud enough to
+    /// plausibly be speech. Server partials lag the audio by a few hundred
+    /// ms, so without this a short utterance released before the first
+    /// partial arrived looked like silence to `finalizeAndInject` and was
+    /// discarded. Cleared on session swap.
+    private var loudFrames = 0
+    /// Frame RMS level that counts toward `loudFrames`. Speech sits around
+    /// -30…-10 dBFS; room noise well below this.
+    private static let speechLevelDBFS: Double = -40
+    /// Loud frames (20 ms each) needed to assume speech, so a single key
+    /// click doesn't count.
+    private static let minSpeechFrames = 5
     /// Text of the most recent `.partial` event on the current session.
     /// Overwritten on each new partial; cleared when a `.final` consumes
     /// the in-progress segment, and on session swap. Used as the fallback
@@ -298,15 +310,18 @@ public actor Orchestrator {
         }
 
         // Fast path: the server emitted neither a `partial_transcript` nor
-        // a `committed_transcript`, so it never recognized any speech.
-        // Sending EOS here would block `awaitFinal` until the server's
+        // a `committed_transcript`, and the mic picked up no more than a
+        // click's worth of loud audio — nothing was said. Sending EOS here
+        // would block `awaitFinal` until the server's
         // `insufficient_audio_activity` error arrives, which ElevenLabs
         // takes ~10 s to emit. Skip EOS and tear down immediately so the
         // next hotkey press isn't gated on that wait. `accumulatedFinal`
         // covers the multi-segment auto-VAD case where a pause-segment
         // commit arrived without any preceding partial — still worth
-        // sending EOS to flush.
-        if !partialsReceived && accumulatedFinal.isEmpty {
+        // sending EOS to flush. `loudFrames` covers a short utterance
+        // released before its first partial arrived; if it turns out to be
+        // noise, `finalizeTimeout` bounds the wait.
+        if !partialsReceived && accumulatedFinal.isEmpty && loudFrames < Self.minSpeechFrames {
             Self.log.debug("finalizeAndInject: no server activity, skipping EOS")
             await closeCurrentSession()
             if let started = sessionStartedAt {
@@ -474,6 +489,7 @@ public actor Orchestrator {
         eventsStreamFinished = false
         postCommitFinalReceived = false
         partialsReceived = false
+        loudFrames = 0
         currentPartial = ""
         completeAudioDrainWait()
         if let waiter = finalizationWaiter {
@@ -633,6 +649,19 @@ public actor Orchestrator {
 
     private var forwardedFrames: Int = 0
 
+    /// Bump `loudFrames` if `samples` (non-empty) is above the speech level.
+    private func countIfLoud(_ samples: [Int16]) {
+        var sum: Double = 0
+        for s in samples {
+            let normalized = Double(s) / Double(Int16.max)
+            sum += normalized * normalized
+        }
+        let rms = (sum / Double(samples.count)).squareRoot()
+        if 20 * log10(max(rms, 1e-6)) > Self.speechLevelDBFS {
+            loudFrames += 1
+        }
+    }
+
     private func forwardFrameIfActive(_ frame: AudioFrame) async {
         // End-of-session sentinel from `audioCapture.stop()`: all captured
         // frames for the session have been yielded by the time we see this.
@@ -640,6 +669,9 @@ public actor Orchestrator {
         if frame.samples.isEmpty {
             completeAudioDrainWait()
             return
+        }
+        if currentSession != nil || preSessionAudio != nil {
+            countIfLoud(frame.samples)
         }
         guard let session = currentSession else {
             // Session still connecting: hold the audio for `openSession` to
