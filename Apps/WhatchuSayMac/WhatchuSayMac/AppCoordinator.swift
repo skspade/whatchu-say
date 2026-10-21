@@ -108,7 +108,10 @@ final class AppCoordinator {
         self.sleepWake = SleepWakeObserver { [orchestrator] in
             await orchestrator.handleSystemSleep()
         }
-        self.audioConfig = AudioConfigurationObserver { [orchestrator] in
+        self.audioConfig = AudioConfigurationObserver { [orchestrator, audio] engineID in
+            // Only the dictation engine matters; a meeting recording's
+            // engines changing must not abort a dictation.
+            guard let engineID, await audio.isCurrentEngine(engineID) else { return }
             await orchestrator.handleAudioInterruption()
         }
 
