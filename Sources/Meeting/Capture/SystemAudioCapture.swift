@@ -19,9 +19,11 @@ public actor SystemAudioCapture: AudioRecorderProtocol {
     public func start() async throws {
         guard tapId == 0 else { return }
 
-        // Create a default-output Process Tap (mute=false, mixed=true: capture
-        // everything routed to the default-output device).
-        let description = CATapDescription(stereoMixdownOfProcesses: [])
+        // Create a global stereo Process Tap (unmuted) that captures every
+        // process's output. The list is processes to *exclude*, so empty means
+        // all of them; `stereoMixdownOfProcesses:` would instead tap only the
+        // listed processes, and an empty list there captures silence.
+        let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         description.muteBehavior = .unmuted
         description.isPrivate = true
         description.name = "whatchu-say-meeting-tap"
