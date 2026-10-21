@@ -276,6 +276,51 @@ actor RecordingSession: SttSession {
     }
 }
 
+// MARK: - GatedOpenProvider
+
+/// Provider whose `open()` suspends until the test calls `releaseOpen()` or
+/// `failOpen()`, modelling the WebSocket connect + `session_started`
+/// handshake. Sessions are `RecordingSession`s so tests can assert exactly
+/// which samples reached the server, and in what order.
+actor GatedOpenProvider: SttProvider {
+    nonisolated let name = "gated-open"
+    nonisolated let capabilities = Capabilities(
+        partials: true,
+        punctuation: true,
+        languages: .auto,
+        sampleRates: [16_000],
+        maxSessionSeconds: nil,
+        supportsClientEndpointing: true
+    )
+
+    private(set) var sessions: [RecordingSession] = []
+    private var openContinuation: CheckedContinuation<Bool, Never>?
+
+    func open(config: SessionConfig) async throws -> any SttSession {
+        let succeed: Bool = await withCheckedContinuation { cont in
+            openContinuation = cont
+        }
+        guard succeed else { throw SttError.transient("handshake failed") }
+        let session = RecordingSession()
+        sessions.append(session)
+        return session
+    }
+
+    var lastSession: RecordingSession? { sessions.last }
+
+    var isOpenPending: Bool { openContinuation != nil }
+
+    func releaseOpen() { resumeOpen(succeed: true) }
+
+    func failOpen() { resumeOpen(succeed: false) }
+
+    private func resumeOpen(succeed: Bool) {
+        guard let cont = openContinuation else { return }
+        openContinuation = nil
+        cont.resume(returning: succeed)
+    }
+}
+
 // MARK: - MultiSegmentProvider / MultiSegmentSession
 
 /// Provider whose sessions model ElevenLabs streaming with `commit_strategy=auto`:
