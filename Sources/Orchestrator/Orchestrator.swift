@@ -17,7 +17,9 @@ import Usage
 /// 3. The orchestrator applies each output sequentially, owning side effects:
 ///    opening/closing STT sessions, scheduling timers, injecting text.
 /// 4. Audio frames flow from `AudioCapturing` into the active STT session via
-///    a long-lived forwarder Task started lazily on first dictation.
+///    a long-lived forwarder Task started lazily on first dictation. Frames
+///    that arrive while a session is still opening are buffered and replayed
+///    into it once the handshake completes.
 ///
 /// ## Concurrency
 /// Single-actor; all state mutations are serialized. The audio forwarder runs
@@ -108,6 +110,16 @@ public actor Orchestrator {
     /// `audioDrainWaiter` is installed. Prevents losing the sentinel during
     /// actor reentrancy while awaiting `audioCapture.stop()`.
     private var audioDrainComplete = false
+    /// Audio captured while `provider.open` is in flight. The mic starts
+    /// before the WebSocket connect + `session_started` handshake (several
+    /// hundred ms), and the user starts talking on key-down — without this
+    /// buffer the forwarder dropped those frames and the start of the
+    /// sentence was lost. Non-nil only while `openSession` runs; replayed
+    /// into the new session before it becomes `currentSession`.
+    private var preSessionAudio: [Int16]?
+    /// Bounds `preSessionAudio` if the handshake hangs. Matches the ~30 s
+    /// pre-provider ring buffer in TECH_SPEC §5.1.
+    private static let maxPreSessionSeconds = 30
 
     public init(
         provider: any SttProvider,
@@ -152,6 +164,11 @@ public actor Orchestrator {
     /// active, otherwise `nil`.
     public func activeMode() -> ActivationMode? {
         currentSession == nil ? nil : currentMode
+    }
+
+    /// Test/diagnostic: samples buffered while a session is still opening.
+    func preSessionBufferedSampleCount() -> Int {
+        preSessionAudio?.count ?? 0
     }
 
     // MARK: - Output dispatch
@@ -200,18 +217,57 @@ public actor Orchestrator {
     }
 
     private func openSession(mode: ActivationMode) async {
+        let epochAtOpen = sessionEpoch
+        preSessionAudio = []
+        defer { preSessionAudio = nil }
         do {
             let session = try await provider.open(config: sessionConfig)
+            do {
+                try await flushPreSessionAudio(into: session)
+            } catch {
+                await session.close()
+                throw error
+            }
+            // A teardown (system sleep, cancel) ran while the handshake was
+            // in flight and already stopped audio and reset the FSM. Don't
+            // resurrect a session nothing owns.
+            guard epochAtOpen == sessionEpoch else {
+                Self.log.debug("openSession: torn down during open, discarding session")
+                await session.close()
+                return
+            }
             currentSession = session
             currentMode = mode
             sessionEpoch &+= 1
             startSessionEventConsumer(session, epoch: sessionEpoch)
             eventsContinuation.yield(.sessionStarted(mode: mode))
         } catch {
-            // TODO(1.4): surface as a toast and reset the FSM. Logging until
-            // we have UI to display this.
             Self.log.error("provider.open failed: \(error.localizedDescription, privacy: .public)")
             eventsContinuation.yield(.error(text: "Failed to open session: \(error.localizedDescription)"))
+            // No session to feed: release the mic (otherwise it stays live,
+            // privacy indicator lit, until the next successful dictation's
+            // finalize stops it) and reset the FSM so the next press starts
+            // cleanly.
+            await interruptAndReset()
+        }
+    }
+
+    /// Replay audio buffered during the handshake into `session` in 1 s
+    /// slices (ElevenLabs' recommended chunk size; oversized chunks are
+    /// rejected with `chunk_size_exceeded`). Loops because the forwarder
+    /// keeps appending while each `pushAudio` is suspended. Returns only once
+    /// the buffer is empty, and the caller installs `currentSession` without
+    /// suspending in between, so live frames can't overtake buffered ones.
+    private func flushPreSessionAudio(into session: any SttSession) async throws {
+        let chunkSamples = Int(sessionConfig.sampleRate)
+        while let pending = preSessionAudio, !pending.isEmpty {
+            preSessionAudio = []
+            var start = 0
+            while start < pending.count {
+                let end = min(start + chunkSamples, pending.count)
+                try await session.pushAudio(Array(pending[start..<end]))
+                start = end
+            }
         }
     }
 
@@ -585,7 +641,15 @@ public actor Orchestrator {
             completeAudioDrainWait()
             return
         }
-        guard let session = currentSession else { return }
+        guard let session = currentSession else {
+            // Session still connecting: hold the audio for `openSession` to
+            // replay once the handshake completes.
+            let cap = Int(sessionConfig.sampleRate) * Self.maxPreSessionSeconds
+            if let buffered = preSessionAudio?.count, buffered < cap {
+                preSessionAudio?.append(contentsOf: frame.samples)
+            }
+            return
+        }
         do {
             try await session.pushAudio(frame.samples)
             forwardedFrames += 1
