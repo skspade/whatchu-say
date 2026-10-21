@@ -79,3 +79,56 @@ struct ChunkerTests {
         #expect(chunker.pendingCount == 0)
     }
 }
+
+@Suite("RMSAnalyzer.level")
+struct RMSLevelTests {
+    @Test("static level matches the actor's process")
+    func staticMatchesActor() async {
+        let samples = (0..<320).map { Int16(truncatingIfNeeded: $0 * 97) }
+        let viaActor = await RMSAnalyzer().process(samples)
+        #expect(RMSAnalyzer.level(samples) == viaActor)
+        #expect(RMSAnalyzer.level([]) == -60)
+    }
+}
+
+#if canImport(AVFoundation)
+@Suite("TapPipeline")
+struct TapPipelineTests {
+    @Test("chunks across callbacks in order, keeping the remainder")
+    func chunksInOrder() {
+        let pipeline = TapPipeline()
+        #expect(pipeline.begin())
+        let first = pipeline.chunk((0..<500).map { Int16($0) })
+        pipeline.end()
+        #expect(pipeline.begin())
+        let second = pipeline.chunk((500..<700).map { Int16($0) })
+        pipeline.end()
+
+        #expect(first.count == 1)
+        #expect(second.count == 1)
+        #expect((first + second).flatMap { $0 } == (0..<640).map { Int16($0) })
+    }
+
+    @Test("drain returns immediately when no callback is running, then rejects new ones")
+    func drainWhenIdle() async {
+        let pipeline = TapPipeline()
+        await pipeline.drain()
+        #expect(!pipeline.begin())
+    }
+
+    @Test("drain waits for a callback that is still running", .timeLimit(.minutes(1)))
+    func drainWaitsForInFlightCallback() async {
+        let pipeline = TapPipeline()
+        #expect(pipeline.begin())
+
+        let drained = Task { await pipeline.drain() }
+        // Give drain() a chance to register as the waiter. (If it hasn't by
+        // the time end() runs, it finds the pipeline idle — either order
+        // must complete.)
+        for _ in 0..<100 { await Task.yield() }
+        pipeline.end()
+        await drained.value
+        #expect(!pipeline.begin())
+    }
+}
+#endif
