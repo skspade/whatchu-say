@@ -18,23 +18,37 @@ public enum InjectorMacError: Error, Sendable, Equatable {
 ///   non-Terminal app).
 /// - **paste** — set `NSPasteboard.general` and post `Cmd+V`. The
 ///   previous clipboard contents are captured and restored after
-///   `restoreDelay`. Concurrent injects cancel any pending restore so
-///   user state doesn't get clobbered out of order.
+///   `restoreDelay`, which must outlast the target app's (asynchronous)
+///   handling of Cmd+V — restore too early and the app pastes the *old*
+///   clipboard. The restore is skipped if anything else has written to the
+///   pasteboard since, and a paste that lands before the previous restore
+///   ran carries the user's original clipboard forward instead of
+///   snapshotting the previous transcript. While a restore is pending the
+///   transcript is marked transient so clipboard managers skip it.
 ///
 /// All AppKit work happens on the main actor; CoreGraphics calls (which
 /// are thread-safe) run on this actor.
 public actor InjectorMac: Injector {
+    /// What to put back once the latest paste has landed.
+    private struct PasteRecord: Sendable {
+        /// Clipboard contents from before the paste.
+        let original: ClipboardSnapshot
+        /// `NSPasteboard.changeCount` right after the transcript was written.
+        let changeCount: Int
+    }
+
     private let selector: StrategySelector
     private let restoreClipboard: Bool
     private let restoreDelay: Duration
     private let typeInterval: Duration
     private var pendingRestore: Task<Void, Never>?
+    private var lastPaste: PasteRecord?
     private let pasteCommand: @Sendable () throws -> Void
 
     public init(
         selector: StrategySelector = StrategySelector(),
         restoreClipboard: Bool = true,
-        restoreDelay: Duration = .milliseconds(100),
+        restoreDelay: Duration = .milliseconds(500),
         typeInterval: Duration = .milliseconds(1),
         pasteCommand: (@Sendable () throws -> Void)? = nil
     ) {
@@ -124,20 +138,33 @@ public actor InjectorMac: Injector {
     private func pasteText(_ text: String) async throws {
         pendingRestore?.cancel()
         pendingRestore = nil
+        let carried = lastPaste
+        lastPaste = nil
 
         let command = pasteCommand
-        let snapshot = try await MainActor.run {
-            let snapshot = ClipboardSnapshot.replace(with: text)
+        let transient = restoreClipboard
+        let record = try await MainActor.run {
+            // If the pasteboard still holds our previous transcript (its
+            // restore hadn't run yet), the clipboard to restore is the one
+            // from before that paste, not the transcript.
+            let original: ClipboardSnapshot
+            if let carried, NSPasteboard.general.changeCount == carried.changeCount {
+                original = carried.original
+            } else {
+                original = ClipboardSnapshot.capture()
+            }
+            let changeCount = ClipboardSnapshot.write(text, transient: transient)
             try command()
-            return snapshot
+            return PasteRecord(original: original, changeCount: changeCount)
         }
 
         guard restoreClipboard else { return }
+        lastPaste = record
         let delay = restoreDelay
         pendingRestore = Task {
             try? await Task.sleep(for: delay)
             if Task.isCancelled { return }
-            await snapshot.restoreToGeneralPasteboard()
+            await record.original.restoreToGeneralPasteboard(ifChangeCountIs: record.changeCount)
         }
     }
 
@@ -197,6 +224,24 @@ struct ClipboardSnapshot: Sendable {
         return snapshot
     }
 
+    /// nspasteboard.org marker telling clipboard managers the entry is
+    /// short-lived and shouldn't be recorded.
+    static let transientTypeRawValue = "org.nspasteboard.TransientType"
+
+    /// Replace the pasteboard contents with `text` and return the resulting
+    /// `changeCount`, so a later restore can tell whether anyone else has
+    /// written since. `transient` adds the clipboard-manager marker.
+    @MainActor
+    static func write(_ text: String, transient: Bool) -> Int {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+        if transient {
+            pb.setData(Data(), forType: NSPasteboard.PasteboardType(rawValue: transientTypeRawValue))
+        }
+        return pb.changeCount
+    }
+
     @MainActor
     func restoreToGeneralPasteboard() {
         let pb = NSPasteboard.general
@@ -205,6 +250,14 @@ struct ClipboardSnapshot: Sendable {
             let type = NSPasteboard.PasteboardType(rawValue: entry.typeRawValue)
             pb.setData(entry.data, forType: type)
         }
+    }
+
+    /// Restore only if the pasteboard hasn't changed since `changeCount` —
+    /// if the user (or another app) copied something meanwhile, keep it.
+    @MainActor
+    func restoreToGeneralPasteboard(ifChangeCountIs changeCount: Int) {
+        guard NSPasteboard.general.changeCount == changeCount else { return }
+        restoreToGeneralPasteboard()
     }
 }
 #endif
