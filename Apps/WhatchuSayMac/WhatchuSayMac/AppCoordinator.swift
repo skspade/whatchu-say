@@ -53,12 +53,17 @@ final class AppCoordinator {
     private var eventTask: Task<Void, Never>?
     private var started = false
 
+    /// - Parameter reusingMeetings: an existing `MeetingsCoordinator` to keep
+    ///   instead of building a new one — passed on a rebuild while a meeting
+    ///   is recording, so the recording (its taps, its Stop menu item) isn't
+    ///   orphaned. It keeps the API key it was created with.
     init(
         apiKey: String,
         state: AppState,
         configStore: ConfigStore,
         recentTranscripts: RecentTranscriptsStore,
-        errorLog: ErrorLogStore
+        errorLog: ErrorLogStore,
+        reusingMeetings: MeetingsCoordinator? = nil
     ) {
         self.state = state
         self.recentTranscripts = recentTranscripts
@@ -112,11 +117,15 @@ final class AppCoordinator {
             await orchestrator.handleAudioInterruption()
         }
 
-        do {
-            self.meetingsCoordinator = try MeetingsCoordinator(apiKey: apiKey, configStore: configStore)
-        } catch {
-            self.meetingsCoordinator = nil
-            state.lastError = "Meeting transcription unavailable: \(error)"
+        if let reusingMeetings {
+            self.meetingsCoordinator = reusingMeetings
+        } else {
+            do {
+                self.meetingsCoordinator = try MeetingsCoordinator(apiKey: apiKey, configStore: configStore)
+            } catch {
+                self.meetingsCoordinator = nil
+                state.lastError = "Meeting transcription unavailable: \(error)"
+            }
         }
     }
 
