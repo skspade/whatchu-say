@@ -147,6 +147,26 @@ struct OrchestratorHandshakeBufferTests {
         await collector.cancel()
     }
 
+    @Test("audio device change during the handshake aborts the dictation",
+          .timeLimit(.minutes(1)))
+    func deviceChangeDuringHandshake() async {
+        let rig = makeRig()
+        let collector = EventCollector()
+        await collector.start(stream: rig.orchestrator.events)
+        let keyDown = await pressAndAwaitHandshake(rig.orchestrator, rig.provider)
+
+        await rig.orchestrator.handleAudioInterruption()
+        await rig.provider.releaseOpen()
+        await keyDown.value
+
+        #expect(await !rig.orchestrator.isCapturing())
+        #expect(await rig.audio.stopCount == 1)
+        let changed = OrchestratorEvent.error(text: "Audio device changed — please retry your dictation.")
+        let events = await collector.waitForEvent(changed)
+        #expect(events.contains(changed))
+        await collector.cancel()
+    }
+
     @Test("system sleep during the handshake discards the late session",
           .timeLimit(.minutes(1)))
     func sleepDuringHandshakeDiscardsSession() async {

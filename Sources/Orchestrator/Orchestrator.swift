@@ -426,9 +426,11 @@ public actor Orchestrator {
     /// menubar icon flips yellow. The trailing `.sessionEnded(nil)` from
     /// `interruptAndReset` doesn't clear `lastError` (cancel/empty isn't
     /// recovery), so the error sticks until the next successful inject.
-    /// No-op if no session is live.
+    /// No-op unless a session is live or still opening; mid-handshake, the
+    /// engine has already stopped, and the teardown makes `openSession`
+    /// discard the late session instead of recording silence.
     public func handleAudioInterruption() async {
-        guard currentSession != nil else { return }
+        guard currentSession != nil || preSessionAudio != nil else { return }
         eventsContinuation.yield(
             .error(text: "Audio device changed — please retry your dictation.")
         )
