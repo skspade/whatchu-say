@@ -19,7 +19,7 @@ User Acceptance Testing for the Phase 4 meeting transcription feature. Run this 
 - [ ] Launch: `open /Applications/WhatchuSayMac.app`. Menu bar icon appears.
 - [ ] Open Settings → check there's no spurious entry in the recent-errors log.
 
-> First launch after the meeting feature lands: the app declares `NSScreenCaptureUsageDescription` in Info.plist but the permission has not been *granted*. The TCC prompt fires the first time you click Start meeting recording.
+> First launch after the meeting feature lands: the app declares `NSAudioCaptureUsageDescription` (system-audio Process Tap) and `NSScreenCaptureUsageDescription` in Info.plist but the permission has not been *granted*. The TCC prompt fires the first time you click Start meeting recording; it should show the "records meeting audio from other apps" copy.
 
 ---
 
