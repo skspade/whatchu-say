@@ -22,7 +22,8 @@ import Usage
 /// ## Concurrency
 /// Single-actor; all state mutations are serialized. The audio forwarder runs
 /// in a background Task and re-enters the actor for every frame to forward.
-/// Timer expirations also re-enter via `handle(hotkeyEvent: .timerExpired)`.
+/// Hotkey events and timer expirations take a FIFO command gate, so one is
+/// fully applied before the next starts even though applying it suspends.
 public actor Orchestrator {
     /// Lifecycle event stream consumed by UI (HUD, menu bar). See
     /// `OrchestratorEvent` for what's emitted and when.
@@ -108,6 +109,18 @@ public actor Orchestrator {
     /// `audioDrainWaiter` is installed. Prevents losing the sentinel during
     /// actor reentrancy while awaiting `audioCapture.stop()`.
     private var audioDrainComplete = false
+    /// FIFO gate for hotkey events and timer expirations. Applying an event
+    /// suspends (opening a session, draining audio, awaiting the committed
+    /// transcript), and without the gate actor reentrancy let a key press
+    /// start a session mid-finalize — the finalize then closed it. Session
+    /// events and teardown signals don't take the gate: finalize waits on them.
+    private var commandInFlight = false
+    private var commandWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Bumped whenever the FSM timer is scheduled or cancelled. A timer whose
+    /// sleep finished just as it was cancelled may already be queued on the
+    /// command gate; a stale generation drops that expiry instead of feeding
+    /// the FSM a `timerExpired` it no longer expects.
+    private var timerGeneration: UInt64 = 0
 
     public init(
         provider: any SttProvider,
@@ -136,10 +149,34 @@ public actor Orchestrator {
     /// output (synchronously from the caller's perspective — when this returns,
     /// session changes, finalization, and injection are all complete).
     public func handle(hotkeyEvent: HotkeyEvent) async {
+        await beginCommand()
+        defer { endCommand() }
+        await process(hotkeyEvent)
+    }
+
+    private func process(_ hotkeyEvent: HotkeyEvent) async {
         Self.log.debug("handle hotkeyEvent: \(String(describing: hotkeyEvent), privacy: .public)")
         let outputs = await stateMachine.handle(hotkeyEvent)
         for output in outputs {
             await apply(output)
+        }
+    }
+
+    private func beginCommand() async {
+        guard commandInFlight else {
+            commandInFlight = true
+            return
+        }
+        await withCheckedContinuation { commandWaiters.append($0) }
+    }
+
+    /// Hand the gate straight to the next waiter, so no new caller can barge
+    /// in ahead of it, or release it.
+    private func endCommand() {
+        if commandWaiters.isEmpty {
+            commandInFlight = false
+        } else {
+            commandWaiters.removeFirst().resume()
         }
     }
 
@@ -386,10 +423,7 @@ public actor Orchestrator {
     /// `.sessionEnded(nil)` if a session was live.
     private func interruptAndReset() async {
         await cancelDictation()
-        if let token = timerToken {
-            await timerScheduler.cancel(token)
-            timerToken = nil
-        }
+        await cancelTimer()
         await stateMachine.reset()
     }
 
@@ -620,24 +654,29 @@ public actor Orchestrator {
     // MARK: - Timer
 
     private func scheduleTimer(after duration: Duration) async {
-        if let oldToken = timerToken {
-            await timerScheduler.cancel(oldToken)
+        await cancelTimer()
+        let generation = timerGeneration
+        timerToken = await timerScheduler.schedule(after: duration) { [weak self] in
+            await self?.timerFired(generation: generation)
         }
-        let token = await timerScheduler.schedule(after: duration) { [weak self] in
-            await self?.timerFired()
-        }
-        timerToken = token
     }
 
     private func cancelTimer() async {
+        timerGeneration &+= 1
         if let token = timerToken {
             await timerScheduler.cancel(token)
             timerToken = nil
         }
     }
 
-    private func timerFired() async {
+    private func timerFired(generation: UInt64) async {
+        await beginCommand()
+        defer { endCommand() }
+        guard generation == timerGeneration else {
+            Self.log.debug("timerFired: stale generation \(generation), dropping")
+            return
+        }
         timerToken = nil
-        await handle(hotkeyEvent: .timerExpired)
+        await process(.timerExpired)
     }
 }
