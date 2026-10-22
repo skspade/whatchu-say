@@ -116,6 +116,15 @@ actor ManualTimerScheduler: TimerScheduler {
         }
     }
 
+    /// Remove every pending timer and return its action without running it.
+    /// Models `TaskTimerScheduler` losing a race with `cancel(_:)`: the sleep
+    /// has already finished, so cancelling no longer stops the action.
+    func takeAll() -> [@Sendable () async -> Void] {
+        let actions = Array(pending.values)
+        pending.removeAll()
+        return actions
+    }
+
     var pendingCount: Int {
         pending.count
     }
