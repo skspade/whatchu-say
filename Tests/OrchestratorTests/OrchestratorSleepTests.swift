@@ -60,7 +60,7 @@ struct OrchestratorSleepTests {
 
         await rig.orchestrator.handleSystemSleep()
 
-        let events = await collector.snapshot()
+        let events = await collector.waitForEvent(.sessionEnded(injectedText: nil))
         #expect(events.contains(.sessionStarted(mode: .pressHold)))
         #expect(events.contains(.sessionEnded(injectedText: nil)))
         #expect(!events.contains(.finalizing))
@@ -87,7 +87,7 @@ struct OrchestratorSleepTests {
 
         await rig.orchestrator.handleSystemSleep()
 
-        let events = await collector.snapshot()
+        let events = await collector.waitForEvent(.sessionEnded(injectedText: nil))
         #expect(events.contains(.sessionEnded(injectedText: nil)))
         #expect(await rig.injector.received.isEmpty)
         #expect(await rig.timer.pendingCount == 0)
@@ -127,9 +127,10 @@ struct OrchestratorSleepTests {
         await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
         await rig.timer.fireAll()
         await rig.provider.yieldFinal("hello after wake")
+        await rig.provider.waitUntilHandled()
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 
-        let events = await collector.snapshot()
+        let events = await collector.waitForEvent(.sessionEnded(injectedText: "hello after wake"))
         #expect(events.contains(.sessionEnded(injectedText: "hello after wake")))
         #expect(await rig.injector.received == ["hello after wake"])
 
