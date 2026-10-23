@@ -109,9 +109,15 @@ public actor HotkeySourceMac: HotkeySource {
         guard let captured = running else { return }
         running = nil
 
-        CGEvent.tapEnable(tap: captured.tap, enable: false)
-        CFRunLoopRemoveSource(CFRunLoopGetMain(), captured.runLoopSource, .commonModes)
-        CFMachPortInvalidate(captured.tap)
+        // Tear the tap down on the main thread, where its callback runs:
+        // once the source is removed there, no callback can still be using
+        // its unretained pointer to `captured.context`, which `captured`
+        // keeps alive until this returns.
+        await MainActor.run {
+            CGEvent.tapEnable(tap: captured.tap, enable: false)
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), captured.runLoopSource, .commonModes)
+            CFMachPortInvalidate(captured.tap)
+        }
         captured.context.continuation.finish()
         captured.consumerTask.cancel()
     }
@@ -124,7 +130,10 @@ public actor HotkeySourceMac: HotkeySource {
         running?.context.setDictating(active)
     }
 
-    private struct Running {
+    /// `@unchecked Sendable` so `stop()` can hand it to the main actor: the
+    /// CFMachPort / CFRunLoop calls made on it are thread-safe, and
+    /// `TapContext` guards its own state with locks.
+    private struct Running: @unchecked Sendable {
         let tap: CFMachPort
         let runLoopSource: CFRunLoopSource
         let context: TapContext
