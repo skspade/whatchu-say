@@ -9,6 +9,9 @@ import Foundation
 
 private let now = Date(timeIntervalSinceReferenceDate: 0)
 
+/// One 20 ms frame of speech-level audio: a ±8000 square wave (~-12 dBFS).
+private let loudFrameSamples: [Int16] = (0..<320).map { $0.isMultiple(of: 2) ? 8_000 : -8_000 }
+
 /// Regression tests for the "recording hangs for ~10 s after key release" bug.
 ///
 /// Root cause: `awaitFinal()` blocked until the session's events stream
@@ -176,6 +179,24 @@ struct OrchestratorSilenceFinalizationTests {
         #expect(eosCount == 0)
     }
 
+    @Test("a click's worth of loud audio still takes the fast path",
+          .timeLimit(.minutes(1)))
+    func briefNoiseStillSkipsEOS() async {
+        let rig = makeRig()
+
+        await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
+        await rig.timer.fireAll()
+        // 40 ms of loud audio — a key click, not speech.
+        for _ in 0..<2 {
+            rig.audio.push(AudioFrame(samples: loudFrameSamples, timestamp: .zero))
+        }
+        await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
+
+        #expect(await !rig.orchestrator.isCapturing())
+        let eosCount = await rig.provider.lastSession?.endOfStreamCount ?? -1
+        #expect(eosCount == 0)
+    }
+
     @Test("orchestrator is reusable after a silent session",
           .timeLimit(.minutes(1)))
     func reusableAfterSilentSession() async {
@@ -286,6 +307,32 @@ struct OrchestratorFinalizeTimeoutTests {
         let eosCount = await rig.provider.lastSession?.endOfStreamCount ?? -1
         #expect(eosCount == 1)
         await collector.cancel()
+    }
+
+    @Test("short utterance released before any partial still sends EOS",
+          .timeLimit(.minutes(1)))
+    func loudAudioWithoutPartialSendsEOS() async {
+        let rig = makeRig()
+
+        await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
+        await rig.timer.fireAll()
+        // 200 ms of speech-level audio; the server hasn't sent a partial yet.
+        for _ in 0..<10 {
+            rig.audio.push(AudioFrame(samples: loudFrameSamples, timestamp: .zero))
+        }
+
+        let handleTask = Task {
+            await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
+        }
+        // EOS was sent and finalize is waiting on the commit; let the
+        // timeout release it (the silent server never answers).
+        await waitForPending(rig.timer, atLeast: 1)
+        await rig.timer.fireAll()
+        await handleTask.value
+
+        let eosCount = await rig.provider.lastSession?.endOfStreamCount ?? -1
+        #expect(eosCount == 1)
+        #expect(await !rig.orchestrator.isCapturing())
     }
 
     @Test("orchestrator is reusable after a timeout-fallback session",
