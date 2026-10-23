@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  # No branch filter: stacked PRs target other fix branches, not main.
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Swift package — build & test
+    # macOS 26 image: default Xcode 26.x, matching the app's toolchain.
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Build (including tests)
+        run: swift build --build-tests
+
+      # The mic / system-audio smoke suites are `.disabled` in source (they
+      # need TCC permissions), so a plain run is safe on a hosted runner.
+      - name: Test
+        run: swift test --skip-build
+
+  app:
+    name: Mac app — build
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      # Local Swift package products only resolve in scheme-based builds
+      # (`-target`/`-alltargets` can't find the package modules). The
+      # project has no shared schemes, so this relies on the one Xcode
+      # autocreates for the WhatchuSayMac target; -list shows what exists.
+      # The project finds the package at ../../../whatchu-say, which the
+      # default checkout path (…/whatchu-say/whatchu-say) satisfies.
+      - name: List schemes
+        run: xcodebuild -list -project Apps/WhatchuSayMac/WhatchuSayMac.xcodeproj
+
+      # build-for-testing compiles the app and WhatchuSayMacTests without
+      # running them: the test host is the menu-bar app itself, which shows
+      # a modal first-run disclosure on a clean machine.
+      - name: Build WhatchuSayMac + tests
+        run: |
+          xcodebuild build-for-testing \
+            -project Apps/WhatchuSayMac/WhatchuSayMac.xcodeproj \
+            -scheme WhatchuSayMac \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO
