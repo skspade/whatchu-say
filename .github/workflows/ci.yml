@@ -43,14 +43,23 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # The project has no shared schemes, so build by target. -alltargets
-      # also compiles WhatchuSayMacTests (running them needs a scheme).
+      # Local Swift package products only resolve in scheme-based builds
+      # (`-target`/`-alltargets` can't find the package modules). The
+      # project has no shared schemes, so this relies on the one Xcode
+      # autocreates for the WhatchuSayMac target; -list shows what exists.
       # The project finds the package at ../../../whatchu-say, which the
       # default checkout path (…/whatchu-say/whatchu-say) satisfies.
-      - name: Build WhatchuSayMac + tests target
+      - name: List schemes
+        run: xcodebuild -list -project Apps/WhatchuSayMac/WhatchuSayMac.xcodeproj
+
+      # build-for-testing compiles the app and WhatchuSayMacTests without
+      # running them: the test host is the menu-bar app itself, which shows
+      # a modal first-run disclosure on a clean machine.
+      - name: Build WhatchuSayMac + tests
         run: |
-          xcodebuild build \
+          xcodebuild build-for-testing \
             -project Apps/WhatchuSayMac/WhatchuSayMac.xcodeproj \
-            -alltargets \
+            -scheme WhatchuSayMac \
+            -destination 'platform=macOS' \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO
