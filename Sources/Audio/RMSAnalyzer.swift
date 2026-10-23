@@ -7,6 +7,12 @@ public actor RMSAnalyzer {
     public init() {}
 
     public func process(_ samples: [Int16]) -> Float {
+        Self.level(samples)
+    }
+
+    /// Synchronous form, for callers that can't hop onto the actor (e.g.
+    /// the audio tap callback).
+    public static func level(_ samples: [Int16]) -> Float {
         guard !samples.isEmpty else { return -60 }
         var sum: Double = 0
         for s in samples {
