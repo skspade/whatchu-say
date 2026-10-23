@@ -154,5 +154,97 @@ struct InjectorMacPasteTimingTests {
         }
         #expect(restored == "user clipboard")
     }
+
+    @Test("back-to-back pastes restore the user's clipboard, not the first transcript")
+    func backToBackPastesRestoreOriginal() async throws {
+        let spy = PasteCommandSpy()
+        let injector = InjectorMac(
+            restoreClipboard: true,
+            restoreDelay: .milliseconds(100),
+            pasteCommand: spy.record
+        )
+
+        await MainActor.run {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString("user clipboard", forType: .string)
+        }
+
+        try await injector.inject(text: "first", hint: .forcePaste)
+        // Lands before the first paste's restore has run.
+        try await injector.inject(text: "second", hint: .forcePaste)
+        #expect(spy.clipboardAtPasteTime == "second")
+
+        try await Task.sleep(for: .milliseconds(300))
+
+        let restored = await MainActor.run {
+            NSPasteboard.general.string(forType: .string)
+        }
+        #expect(restored == "user clipboard")
+    }
+
+    @Test("restore is skipped if something else wrote to the clipboard meanwhile")
+    func restoreSkippedAfterExternalWrite() async throws {
+        let injector = InjectorMac(
+            restoreClipboard: true,
+            restoreDelay: .milliseconds(50),
+            pasteCommand: {}
+        )
+
+        await MainActor.run {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString("user clipboard", forType: .string)
+        }
+
+        try await injector.inject(text: "transcription", hint: .forcePaste)
+
+        // The user copies something before the restore fires.
+        await MainActor.run {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString("copied meanwhile", forType: .string)
+        }
+
+        try await Task.sleep(for: .milliseconds(150))
+
+        let current = await MainActor.run {
+            NSPasteboard.general.string(forType: .string)
+        }
+        #expect(current == "copied meanwhile")
+    }
+
+    @Test("transcript is marked transient only when it will be restored")
+    func transientMarkerOnlyWhenRestoring() async throws {
+        let restoring = InjectorMac(
+            restoreClipboard: true,
+            restoreDelay: .milliseconds(100),
+            pasteCommand: {}
+        )
+        try await restoring.inject(text: "temporary", hint: .forcePaste)
+        let markedWhenRestoring = await MainActor.run {
+            NSPasteboard.general.types?.contains(
+                NSPasteboard.PasteboardType(rawValue: ClipboardSnapshot.transientTypeRawValue)
+            ) ?? false
+        }
+        #expect(markedWhenRestoring)
+
+        // Leave-on-clipboard mode: a normal, permanent copy.
+        let keeping = InjectorMac(restoreClipboard: false, pasteCommand: {})
+        try await keeping.inject(text: "kept", hint: .forcePaste)
+        let markedWhenKept = await MainActor.run {
+            NSPasteboard.general.types?.contains(
+                NSPasteboard.PasteboardType(rawValue: ClipboardSnapshot.transientTypeRawValue)
+            ) ?? false
+        }
+        #expect(!markedWhenKept)
+
+        // The first injector's restore sees the second write and stands down.
+        try await Task.sleep(for: .milliseconds(200))
+        let current = await MainActor.run {
+            NSPasteboard.general.string(forType: .string)
+        }
+        #expect(current == "kept")
+    }
 }
 #endif
