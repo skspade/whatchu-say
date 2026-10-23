@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  # No branch filter: stacked PRs target other fix branches, not main.
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Swift package — build & test
+    # macOS 26 image: default Xcode 26.x, matching the app's toolchain.
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Build (including tests)
+        run: swift build --build-tests
+
+      # The mic / system-audio smoke suites are `.disabled` in source (they
+      # need TCC permissions), so a plain run is safe on a hosted runner.
+      - name: Test
+        run: swift test --skip-build
+
+  app:
+    name: Mac app — build
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      # The project has no shared schemes, so build by target. -alltargets
+      # also compiles WhatchuSayMacTests (running them needs a scheme).
+      # The project finds the package at ../../../whatchu-say, which the
+      # default checkout path (…/whatchu-say/whatchu-say) satisfies.
+      - name: Build WhatchuSayMac + tests target
+        run: |
+          xcodebuild build \
+            -project Apps/WhatchuSayMac/WhatchuSayMac.xcodeproj \
+            -alltargets \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO
