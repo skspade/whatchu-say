@@ -66,14 +66,15 @@ public actor KeychainAPIKeyStore {
         case errSecItemNotFound:
             return nil
         default:
-            // The entry exists but its data can't be decrypted by this
-            // process — it was written under a since-invalidated code
-            // signature (e.g. a revoked Apple Development certificate). The
-            // value is unrecoverable, so purge the dead entry and report
-            // "no key": the app drops into its setup flow and the next
-            // `write` takes the clean `add` path instead of staying wedged.
-            try purgeInaccessibleEntry(provider: provider, accessStatus: status)
-            return nil
+            // Never delete on read. A dead-signature entry (e.g. a revoked
+            // Apple Development certificate, `errSecCertificateRevoked`)
+            // looks the same from here as a user clicking Deny on the access
+            // prompt (`errSecUserCanceled` / `errSecAuthFailed`) or a locked
+            // keychain (`errSecInteractionNotAllowed`) — and purging in those
+            // cases silently destroyed a perfectly good key. The caller logs
+            // the error and falls back to setup; the next `write` clears a
+            // genuinely dead entry via `recoverOrphanedEntry`.
+            throw KeychainError.osStatus(status)
         }
     }
 
