@@ -265,4 +265,119 @@ struct RegularKeyActivationTests {
         #expect(event == nil)
     }
 }
+
+@Suite("HotkeyEventTranslator: chord activation (⌘⇧9)")
+struct ChordActivationTests {
+    let translator = HotkeyEventTranslator(
+        activation: HotkeyBinding(
+            keyCode: 0x19, // "9"
+            pressFlag: nil,
+            modifiers: [.maskCommand, .maskShift]
+        ),
+        cancel: .escape
+    )
+
+    private func keyDown(_ flags: CGEventFlags) -> HotkeyEvent? {
+        translator.translate(type: .keyDown, keyCode: 0x19, flags: flags, autoRepeat: false, now: now)
+    }
+
+    @Test("exact chord fires, ignoring device bits and Caps Lock")
+    func exactChordFires() {
+        // 0x08 / 0x02: device-specific left-⌘ / left-⇧ bits.
+        let flags = CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue
+            | CGEventFlags.maskShift.rawValue | 0x08 | 0x02)
+            .union(.maskAlphaShift)
+        #expect(keyDown(flags) == .keyDown(at: now))
+    }
+
+    @Test("bare key does not fire")
+    func bareKeyIgnored() {
+        #expect(keyDown([]) == nil)
+    }
+
+    @Test("partial chord does not fire")
+    func partialChordIgnored() {
+        #expect(keyDown(.maskCommand) == nil)
+    }
+
+    @Test("extra modifier does not fire")
+    func extraModifierIgnored() {
+        #expect(keyDown([.maskCommand, .maskShift, .maskAlternate]) == nil)
+    }
+
+    @Test("release matches on key code alone (modifiers often let go first)")
+    func releaseIgnoresModifiers() {
+        let event = translator.translate(type: .keyUp, keyCode: 0x19, flags: [], autoRepeat: false, now: now)
+        #expect(event == .keyUp(at: now))
+    }
+
+    @Test("binding without modifiers fires regardless of held modifiers")
+    func unmodifiedBindingIgnoresFlags() {
+        let f19 = HotkeyEventTranslator(
+            activation: HotkeyBinding(keyCode: 0x50, pressFlag: nil),
+            cancel: .escape
+        )
+        let event = f19.translate(type: .keyDown, keyCode: 0x50, flags: .maskShift, autoRepeat: false, now: now)
+        #expect(event == .keyDown(at: now))
+    }
+}
+
+@Suite("HotkeyEventTranslator: cancel-key modifiers")
+struct CancelModifierTests {
+    @Test("Esc cancels while the right-Option activation is held")
+    func cancelWhileHoldingActivationModifier() {
+        let translator = HotkeyEventTranslator(activation: .rightOption, cancel: .escape)
+        let event = translator.translate(
+            type: .keyDown,
+            keyCode: 0x35,
+            flags: CGEventFlags(rawValue: 0x40 | 0x80000), // R-Option held
+            autoRepeat: false,
+            now: now
+        )
+        #expect(event == .cancelKey(at: now))
+    }
+
+    @Test("cancel with modifiers requires them, but allows extras")
+    func cancelModifiersRequired() {
+        let translator = HotkeyEventTranslator(
+            activation: HotkeyBinding(keyCode: 0x19, pressFlag: nil, modifiers: [.maskCommand, .maskShift]),
+            cancel: HotkeyBinding(keyCode: 0x08, pressFlag: nil, modifiers: .maskControl) // ⌃C
+        )
+        let bare = translator.translate(type: .keyDown, keyCode: 0x08, flags: [], autoRepeat: false, now: now)
+        #expect(bare == nil)
+        let whileHoldingChord = translator.translate(
+            type: .keyDown,
+            keyCode: 0x08,
+            flags: [.maskControl, .maskCommand, .maskShift],
+            autoRepeat: false,
+            now: now
+        )
+        #expect(whileHoldingChord == .cancelKey(at: now))
+    }
+}
+
+@Suite("HotkeyConfigTranslator: modifiers")
+struct HotkeyConfigTranslatorModifierTests {
+    @Test("recorded modifiers reach the binding; fn and Caps Lock are dropped")
+    func modifiersCarriedThrough() {
+        let config = Core.HotkeyConfig(
+            keyCode: 0x19,
+            modifiers: [.command, .shift, .function, .capsLock],
+            cancelKeyCode: 0x08,
+            cancelModifiers: [.control]
+        )
+        let bindings = HotkeyConfigTranslator.bindings(from: config)
+        #expect(bindings.activation.keyCode == 0x19)
+        #expect(bindings.activation.pressFlag == nil)
+        #expect(bindings.activation.modifiers == [.maskCommand, .maskShift])
+        #expect(bindings.cancel.modifiers == .maskControl)
+    }
+
+    @Test("defaults still map to right Option + Escape")
+    func defaultsUnchanged() {
+        let bindings = HotkeyConfigTranslator.bindings(from: Core.HotkeyConfig())
+        #expect(bindings.activation == .rightOption)
+        #expect(bindings.cancel == .escape)
+    }
+}
 #endif
