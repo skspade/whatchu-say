@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/integration-all-fixes]  # integration branch only — not in PR #44
   # No branch filter: stacked PRs target other fix branches, not main.
   pull_request:
   workflow_dispatch:
