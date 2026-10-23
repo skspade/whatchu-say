@@ -59,14 +59,14 @@ struct OrchestratorTranscriptAccumulationTests {
         guard let session else { return }
 
         // Three pause-segments commit while the user is still talking.
-        session.yieldFinal("first segment")
-        session.yieldFinal("second segment")
-        session.yieldFinal("third segment")
+        await session.yieldFinal("first segment")
+        await session.yieldFinal("second segment")
+        await session.yieldFinal("third segment")
         // Pre-load the post-EOS commit; emitted when finalize calls endOfStream.
         await session.setEndOfStreamFinal("fourth segment")
 
-        // Let the events consumer drain the three pre-EOS finals before keyUp.
-        for _ in 0..<16 { await Task.yield() }
+        // Let the events consumer handle the three pre-EOS finals before keyUp.
+        await session.waitUntilHandled()
 
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 
@@ -93,10 +93,10 @@ struct OrchestratorTranscriptAccumulationTests {
         #expect(session != nil)
         guard let session else { return }
 
-        session.yieldFinal("during session")
+        await session.yieldFinal("during session")
         await session.setEndOfStreamFinal("after end of stream")
 
-        for _ in 0..<16 { await Task.yield() }
+        await session.waitUntilHandled()
 
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 

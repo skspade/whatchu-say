@@ -55,10 +55,11 @@ struct OrchestratorEventTests {
 
         // Pre-yield the final so finalizeAndInject can complete on keyUp.
         await rig.provider.yieldFinal("hello world")
+        await rig.provider.waitUntilHandled()
 
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 
-        let events = await collector.snapshot()
+        let events = await collector.waitForEvent(.sessionEnded(injectedText: "hello world"))
         #expect(events.contains(.sessionStarted(mode: .pressHold)))
         #expect(events.contains(.finalizing))
         #expect(events.contains(.sessionEnded(injectedText: "hello world")))
@@ -80,10 +81,11 @@ struct OrchestratorEventTests {
         await rig.provider.yieldPartial("hi th")
         await rig.provider.yieldPartial("hi there")
         await rig.provider.yieldFinal("hi there")
+        await rig.provider.waitUntilHandled()
 
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 
-        let events = await collector.snapshot()
+        let events = await collector.waitForEvent(.sessionEnded(injectedText: "hi there"))
         let partials = events.compactMap { event -> String? in
             if case .partial(let text) = event { return text }
             return nil
@@ -104,7 +106,7 @@ struct OrchestratorEventTests {
         await rig.timer.fireAll()
         await rig.orchestrator.handle(hotkeyEvent: .cancelKey(at: now))
 
-        let events = await collector.snapshot()
+        let events = await collector.waitForEvent(.sessionEnded(injectedText: nil))
         #expect(events.contains(.sessionStarted(mode: .pressHold)))
         #expect(events.contains(.sessionEnded(injectedText: nil)))
         #expect(!events.contains(.finalizing))
@@ -129,7 +131,7 @@ struct OrchestratorEventTests {
 
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 
-        let events = await collector.snapshot()
+        let events = await collector.waitForEvent(.sessionEnded(injectedText: "recovered text"))
         #expect(events.contains(.error(text: "transient hiccup")))
         // Session still completes normally after a warning.
         #expect(events.contains(.sessionEnded(injectedText: "recovered text")))
@@ -148,7 +150,7 @@ struct OrchestratorEventTests {
         await rig.provider.yieldFinal("")
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 
-        let events = await collector.snapshot()
+        let events = await collector.waitForEvent(.sessionEnded(injectedText: nil))
         #expect(events.contains(.sessionEnded(injectedText: nil)))
         #expect(await rig.injector.received.isEmpty)
 
@@ -165,15 +167,17 @@ struct OrchestratorEventTests {
         await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
         await rig.timer.fireAll()
         await rig.provider.yieldFinal("first")
+        await rig.provider.waitUntilHandled()
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 
         // Second session
         await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
         await rig.timer.fireAll()
         await rig.provider.yieldFinal("second")
+        await rig.provider.waitUntilHandled()
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 
-        let events = await collector.snapshot()
+        let events = await collector.waitForEvent(.sessionEnded(injectedText: "second"))
         let endedTexts = events.compactMap { event -> String?? in
             if case .sessionEnded(let text) = event { return text }
             return nil
@@ -256,10 +260,11 @@ struct OrchestratorEventTests {
 
         // Now the second session is open. Drive it to completion.
         await rig.provider.yieldFinal("hands-free output")
+        await rig.provider.waitUntilHandled()
         await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))   // exiting (stop)
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))     // idle
 
-        let events = await collector.snapshot()
+        let events = await collector.waitForEvent(.sessionEnded(injectedText: "hands-free output"))
         let starts = events.filter { event in
             if case .sessionStarted = event { return true }
             return false
@@ -294,7 +299,7 @@ struct OrchestratorEventTests {
 
         await orchestrator.handle(hotkeyEvent: .keyDown(at: now))
 
-        let events = await collector.snapshot()
+        let events = await collector.waitForEvent(.permissionDenied(kind: .microphone))
         #expect(events.contains(.permissionDenied(kind: .microphone)))
         // No session was opened — the orchestrator bailed before
         // touching the provider.
