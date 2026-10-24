@@ -119,7 +119,11 @@ final class HUDController {
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = Self.fadeDuration
             panel.animator().alphaValue = 0
-        }, completionHandler: { [weak panel] in
+        }, completionHandler: { [weak self, weak panel] in
+            // A new session may have re-shown the panel during the fade-out
+            // (`fadeIn` skips `orderFront` while it's still visible); only
+            // order it out if it's still meant to be hidden.
+            guard self?.state.status == .hidden else { return }
             panel?.orderOut(nil)
         })
     }
