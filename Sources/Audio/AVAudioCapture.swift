@@ -61,6 +61,13 @@ public actor AVAudioCapture: AudioCapturing {
         self.rmsContinuation = rCont
     }
 
+    /// Whether `engineID` identifies the engine currently capturing. Lets the
+    /// app ignore `AVAudioEngineConfigurationChange` from the other engines
+    /// in the process (meeting recording runs its own).
+    public func isCurrentEngine(_ engineID: ObjectIdentifier) -> Bool {
+        engine.map { ObjectIdentifier($0) } == engineID
+    }
+
     public func start() async throws {
         guard engine == nil else { return }
 
