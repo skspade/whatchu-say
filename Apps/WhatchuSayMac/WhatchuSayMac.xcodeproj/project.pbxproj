@@ -403,6 +403,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Whatchu-Say records meeting audio from other apps so it can be transcribed.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = " Whatchu-Say uses the microphone for dictation";
 				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Whatchu-Say records meeting audio from other apps so it can be transcribed.";
@@ -440,6 +441,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Whatchu-Say records meeting audio from other apps so it can be transcribed.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = " Whatchu-Say uses the microphone for dictation";
 				INFOPLIST_KEY_NSScreenCaptureUsageDescription = "Whatchu-Say records meeting audio from other apps so it can be transcribed.";
