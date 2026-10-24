@@ -29,6 +29,12 @@ import Hotkey
 /// reach the focused app (Esc would otherwise close modals, exit text
 /// fields, etc.). The flag is flipped by `setDictating(_:)`, driven from
 /// the orchestrator's `.sessionStarted` / `.sessionEnded` events upstream.
+///
+/// ## Activation-key consumption
+/// Regular-key and mouse-button activations are always swallowed (press,
+/// auto-repeats, release) so the hotkey doesn't also type a character or
+/// fire browser Back/Forward — see `ActivationKeyGate`. Modifier-only
+/// activations pass through.
 public actor HotkeySourceMac: HotkeySource {
     private let translator: HotkeyEventTranslator
     private var running: Running?
@@ -128,11 +134,12 @@ public actor HotkeySourceMac: HotkeySource {
 
 // MARK: - Consumption gate
 
-/// Pure decision: should the C callback swallow this event?
+/// Pure decision: should the C callback swallow this cancel-key event?
 ///
 /// We yield the translated event into the AsyncStream regardless (the FSM
 /// still needs to see `.cancelKey` to drive the cancel flow); we only
-/// suppress propagation to the focused app.
+/// suppress propagation to the focused app. Activation-key consumption is
+/// decided separately by `ActivationKeyGate`.
 @inline(__always)
 func shouldConsume(translated: HotkeyEvent?, isDictating: Bool) -> Bool {
     guard isDictating else { return false }
@@ -152,6 +159,7 @@ private final class TapContext: @unchecked Sendable {
     private struct TapBox: @unchecked Sendable { var port: CFMachPort? }
     private let dictating = OSAllocatedUnfairLock<Bool>(initialState: false)
     private let tapRef = OSAllocatedUnfairLock<TapBox>(initialState: TapBox())
+    private let gate = OSAllocatedUnfairLock<ActivationKeyGate>(initialState: ActivationKeyGate())
 
     init(
         translator: HotkeyEventTranslator,
@@ -172,18 +180,29 @@ private final class TapContext: @unchecked Sendable {
         recoverLostKeyUp()
     }
 
-    /// After a tap-disabled window, the `flagsChanged` event for the
-    /// activation modifier's release may have been lost. Check the live
-    /// modifier state; if the key is no longer held, synthesize a `.keyUp`
-    /// so the session doesn't hang waiting for a release that already
-    /// happened.
+    /// After a tap-disabled window, the release event for the activation
+    /// key may have been lost. Check the live key state; if the key is no
+    /// longer held, synthesize a `.keyUp` so the session doesn't hang
+    /// waiting for a release that already happened.
     private func recoverLostKeyUp() {
-        guard let pressFlag = translator.activation.pressFlag else { return }
-        let currentFlags = CGEventSource.flagsState(.combinedSessionState)
-        if !currentFlags.contains(pressFlag) {
-            print("[HotkeySource] tap re-enabled: activation modifier released while tap was disabled — synthesizing keyUp")
-            continuation.yield(.keyUp(at: Date()))
+        let activation = translator.activation
+        if let pressFlag = activation.pressFlag {
+            let currentFlags = CGEventSource.flagsState(.combinedSessionState)
+            if !currentFlags.contains(pressFlag) {
+                print("[HotkeySource] tap re-enabled: activation modifier released while tap was disabled — synthesizing keyUp")
+                continuation.yield(.keyUp(at: Date()))
+            }
+            return
         }
+        // Regular key: only if we saw the press but not the release. Mouse
+        // buttons are left alone.
+        guard !MouseButtonSentinel.isMouseButton(activation.keyCode),
+              gate.withLock({ $0.held }),
+              !CGEventSource.keyState(.combinedSessionState, key: activation.keyCode)
+        else { return }
+        gate.withLock { $0.releaseLost() }
+        print("[HotkeySource] tap re-enabled: activation key released while tap was disabled — synthesizing keyUp")
+        continuation.yield(.keyUp(at: Date()))
     }
 
     func setDictating(_ active: Bool) {
@@ -215,11 +234,16 @@ private final class TapContext: @unchecked Sendable {
             autoRepeat: autoRepeat,
             now: Date()
         )
-        if let translated {
-            continuation.yield(translated)
+        let activation = translator.activation
+        let decision = gate.withLock {
+            $0.filter(translated, type: type, keyCode: keyCode, activation: activation)
+        }
+        if let forwarded = decision.event {
+            continuation.yield(forwarded)
         }
         let isDictating = dictating.withLock { $0 }
-        return shouldConsume(translated: translated, isDictating: isDictating)
+        return decision.consume
+            || shouldConsume(translated: decision.event, isDictating: isDictating)
     }
 }
 
