@@ -54,6 +54,31 @@ struct ConfigStoreLoadTests {
         let store = ConfigStore(persistence: persistence)
         #expect(store.config == AppConfig())
     }
+
+    @Test("Corrupt persistence is backed up before defaults overwrite it")
+    func corruptLoadBacksUp() {
+        let garbage = "garbage".data(using: .utf8)
+        let persistence = InMemoryConfigPersistence(initial: garbage)
+        _ = ConfigStore(persistence: persistence)
+        #expect(persistence.backupSnapshot == garbage)
+    }
+
+    @Test("Config from a newer build is never overwritten, even after update + flush")
+    func futureSchemaIsPreserved() async throws {
+        let json = #"{"schemaVersion": 99}"#.data(using: .utf8)
+        let persistence = InMemoryConfigPersistence(initial: json)
+        let store = ConfigStore(persistence: persistence, saveDebounce: .milliseconds(20))
+        #expect(persistence.snapshot == json)
+
+        // Changes still apply for this session...
+        store.update { $0.startup.launchAtLogin = true }
+        #expect(store.config.startup.launchAtLogin)
+
+        // ...but neither the debounced save nor an explicit flush writes.
+        try await Task.sleep(for: .milliseconds(80))
+        store.flush()
+        #expect(persistence.snapshot == json)
+    }
 }
 
 @MainActor

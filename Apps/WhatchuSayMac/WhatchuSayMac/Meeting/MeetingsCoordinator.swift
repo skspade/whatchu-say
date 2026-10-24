@@ -17,6 +17,7 @@ final class MeetingsCoordinator {
     private let library: MeetingLibrary
     private let configStore: ConfigStore
     private let transcriptWindow = TranscriptWindow()
+    private var startPanel: StartMeetingPanel?
     private var elapsedTimer: Timer?
 
     /// Mutated on the main actor; observed by the menu bar to swap
@@ -54,6 +55,13 @@ final class MeetingsCoordinator {
     }
 
     @objc func startMeetingMenuAction(_ sender: NSMenuItem) {
+        // Bring the open panel forward rather than stacking another one, so
+        // repeated menu clicks can't queue up competing starts.
+        if let panel = startPanel, panel.isVisible {
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
         let panel = StartMeetingPanel(
             showConsentReminder: configStore.config.meetings.showConsentReminder,
             showAttendeeField: configStore.config.meetings.showAttendeeFieldAtStart,
@@ -62,6 +70,9 @@ final class MeetingsCoordinator {
             },
             onCancel: {}
         )
+        // We hold a strong reference; AppKit must not also release on close.
+        panel.isReleasedWhenClosed = false
+        startPanel = panel
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

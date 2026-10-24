@@ -39,6 +39,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     private var settingsWindow: NSWindow?
     private var currentKey: String?
+    /// The most recent coordinator rebuild. Each rebuild waits for the one
+    /// before it, so overlapping key saves (menu prompt + Provider pane)
+    /// can't interleave across their awaits and leave two live coordinators.
+    private var coordinatorRebuild: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("[WhatchuSay] applicationDidFinishLaunching")
@@ -218,7 +222,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Coordinator lifecycle
 
     private func bringUpCoordinator(apiKey: String) async {
+        let previous = coordinatorRebuild
+        let rebuild = Task { @MainActor in
+            await previous?.value
+            await self.rebuildCoordinator(apiKey: apiKey)
+        }
+        coordinatorRebuild = rebuild
+        await rebuild.value
+    }
+
+    private func rebuildCoordinator(apiKey: String) async {
+        // A meeting that's recording survives the rebuild: a fresh
+        // MeetingsCoordinator would drop its Stop item and taps, and its
+        // launch-recovery prompt would offer to discard the live session.
+        var carriedMeetings: MeetingsCoordinator?
         if let existing = coordinator {
+            if existing.meetingsCoordinator?.isRecording == true {
+                carriedMeetings = existing.meetingsCoordinator
+            }
             await existing.shutdown()
             coordinator = nil
             statusItemController?.meetingsCoordinator = nil
@@ -229,7 +250,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             state: state,
             configStore: configStore,
             recentTranscripts: recentTranscripts,
-            errorLog: errorLog
+            errorLog: errorLog,
+            reusingMeetings: carriedMeetings
         )
         coordinator = coord
         statusItemController?.meetingsCoordinator = coord.meetingsCoordinator
@@ -247,9 +269,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             // Surface in the error log the user actually checks — a silent
             // print here is why a revoked-signature keychain failure looked
-            // like "no key" with no explanation. `KeychainError` is
-            // CustomStringConvertible, so this carries the actionable
-            // "open Keychain Access…" guidance for the orphaned case.
+            // like "no key" with no explanation. The raw OSStatus lands in
+            // the log; the entry itself is left intact (a denied prompt or
+            // locked keychain is recoverable), and saving the key again
+            // clears an entry tied to a dead signature.
             errorLog.record(text: "Keychain read failed: \(error)")
             return nil
         }
