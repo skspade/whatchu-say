@@ -4,7 +4,11 @@ import STTCore
 public actor MeetingOrchestrator {
     public enum State: Sendable, Equatable {
         case idle
+        /// Recorders are spinning up (possibly behind a TCC prompt).
+        case starting
         case recording(UUID)
+        /// Recorders are being stopped; transcription follows.
+        case stopping(UUID)
         case transcribing(UUID)
     }
 
@@ -35,6 +39,11 @@ public actor MeetingOrchestrator {
 
     public func start(attendees: AttendeeList, keepAudio: Bool) async throws -> UUID {
         guard case .idle = state else { throw MeetingError.alreadyRecording }
+        // Claim the slot before the first await: `mic.start()` can sit on a
+        // permission prompt, and a second start that slipped past the guard
+        // would overwrite this meeting's recorders without stopping them.
+        state = .starting
+        defer { if state == .starting { state = .idle } }
         let session = MeetingSession(
             id: UUID(),
             title: nil,
@@ -66,6 +75,9 @@ public actor MeetingOrchestrator {
 
     public func stop() async throws {
         guard case .recording(let id) = state else { return }
+        // Leave `.recording` before awaiting the recorders so a second stop
+        // is a no-op instead of transcribing the meeting twice.
+        state = .stopping(id)
         await activeMicRecorder?.stop()
         await activeSystemRecorder?.stop()
         activeMicRecorder = nil
@@ -82,12 +94,16 @@ public actor MeetingOrchestrator {
     }
 
     private func transcribe(id: UUID) async throws {
+        state = .transcribing(id)
+        // Every exit returns to idle, including the library calls below that
+        // throw before the pipeline runs — otherwise the orchestrator stays
+        // wedged and every later start throws `alreadyRecording`.
+        defer { state = .idle }
         var session = try library.load(id: id)
         if session.endedAt == nil {
             session.markStopped(at: Date())
         }
         try library.update(session: session)
-        state = .transcribing(id)
 
         let micURL = try library.micFile(for: id)
         let systemURL = try library.systemFile(for: id)
@@ -105,11 +121,9 @@ public actor MeetingOrchestrator {
             if !session.keepAudio {
                 try? library.deleteAudio(for: id)
             }
-            state = .idle
         } catch {
             session.markFailed(reason: String(describing: error))
             try? library.update(session: session)
-            state = .idle
             throw error
         }
     }

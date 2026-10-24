@@ -10,7 +10,7 @@ public actor SystemAudioCapture: AudioRecorderProtocol {
     private var tapId: AudioObjectID = 0
     private var aggregateId: AudioObjectID = 0
     private var engine: AVAudioEngine?
-    private var writer: OpusFileWriter?
+    private var sink: TapFileSink?
 
     public init(outputURL: URL) {
         self.outputURL = outputURL
@@ -19,9 +19,11 @@ public actor SystemAudioCapture: AudioRecorderProtocol {
     public func start() async throws {
         guard tapId == 0 else { return }
 
-        // Create a default-output Process Tap (mute=false, mixed=true: capture
-        // everything routed to the default-output device).
-        let description = CATapDescription(stereoMixdownOfProcesses: [])
+        // Create a global stereo Process Tap (unmuted) that captures every
+        // process's output. The list is processes to *exclude*, so empty means
+        // all of them; `stereoMixdownOfProcesses:` would instead tap only the
+        // listed processes, and an empty list there captures silence.
+        let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         description.muteBehavior = .unmuted
         description.isPrivate = true
         description.name = "whatchu-say-meeting-tap"
@@ -53,11 +55,12 @@ public actor SystemAudioCapture: AudioRecorderProtocol {
         try input.auAudioUnit.setDeviceID(agg)
         let inputFormat = input.inputFormat(forBus: 0)
         let writer = try OpusFileWriter(url: outputURL, sampleRate: inputFormat.sampleRate)
+        let sink = TapFileSink(writer: writer)
         self.engine = engine
-        self.writer = writer
+        self.sink = sink
 
-        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
-            Task { await self?.handle(buffer: buffer) }
+        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
+            sink.append(buffer)
         }
         try engine.start()
     }
@@ -66,8 +69,8 @@ public actor SystemAudioCapture: AudioRecorderProtocol {
         engine?.inputNode.removeTap(onBus: 0)
         engine?.stop()
         engine = nil
-        try? writer?.close()
-        writer = nil
+        sink?.close()
+        sink = nil
         if aggregateId != 0 {
             AudioHardwareDestroyAggregateDevice(aggregateId)
             aggregateId = 0
@@ -76,10 +79,6 @@ public actor SystemAudioCapture: AudioRecorderProtocol {
             AudioHardwareDestroyProcessTap(tapId)
             tapId = 0
         }
-    }
-
-    private func handle(buffer: AVAudioPCMBuffer) {
-        try? writer?.append(buffer: buffer)
     }
 }
 
