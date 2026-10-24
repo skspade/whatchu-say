@@ -148,16 +148,22 @@ actor ScriptableProvider: SttProvider {
     /// The most recently opened session, or nil if none.
     var lastSession: ScriptableSession? { sessions.last }
 
-    func yieldPartial(_ text: String, stability: Float = 0.5) {
-        sessions.last?.yieldPartial(text, stability: stability)
+    func yieldPartial(_ text: String, stability: Float = 0.5) async {
+        await sessions.last?.yieldPartial(text, stability: stability)
     }
 
-    func yieldFinal(_ text: String) {
-        sessions.last?.yieldFinal(text)
+    func yieldFinal(_ text: String) async {
+        await sessions.last?.yieldFinal(text)
     }
 
-    func yieldWarning(_ message: String) {
-        sessions.last?.yieldWarning(message)
+    func yieldWarning(_ message: String) async {
+        await sessions.last?.yieldWarning(message)
+    }
+
+    /// Wait until the orchestrator has handled every event yielded so far on
+    /// the most recent session. See `SessionEventQueue`.
+    func waitUntilHandled() async {
+        await sessions.last?.waitUntilHandled()
     }
 }
 
@@ -168,28 +174,32 @@ actor ScriptableProvider: SttProvider {
 /// "no more commits are coming."
 final class ScriptableSession: SttSession, @unchecked Sendable {
     nonisolated let events: AsyncStream<SttEvent>
-    private let continuation: AsyncStream<SttEvent>.Continuation
+    private let queue: SessionEventQueue
 
     init() {
-        let (stream, cont) = AsyncStream<SttEvent>.makeStream()
-        self.events = stream
-        self.continuation = cont
+        let queue = SessionEventQueue()
+        self.queue = queue
+        self.events = queue.makeStream()
     }
 
     func pushAudio(_ samples: [Int16]) async throws {}
-    func endOfStream() async throws { continuation.finish() }
-    func close() async { continuation.finish() }
+    func endOfStream() async throws { await queue.finish() }
+    func close() async { await queue.finish() }
 
-    func yieldPartial(_ text: String, stability: Float = 0.5) {
-        continuation.yield(.partial(text: text, stability: stability))
+    func yieldPartial(_ text: String, stability: Float = 0.5) async {
+        await queue.yield(.partial(text: text, stability: stability))
     }
 
-    func yieldFinal(_ text: String) {
-        continuation.yield(.final(text: text, alternatives: []))
+    func yieldFinal(_ text: String) async {
+        await queue.yield(.final(text: text, alternatives: []))
     }
 
-    func yieldWarning(_ message: String) {
-        continuation.yield(.warning(message))
+    func yieldWarning(_ message: String) async {
+        await queue.yield(.warning(message))
+    }
+
+    func waitUntilHandled() async {
+        await queue.waitUntilHandled()
     }
 }
 
@@ -358,21 +368,26 @@ actor MultiSegmentProvider: SttProvider {
 
 actor MultiSegmentSession: SttSession {
     nonisolated let events: AsyncStream<SttEvent>
-    private nonisolated let continuation: AsyncStream<SttEvent>.Continuation
+    private let queue: SessionEventQueue
 
     private var endOfStreamFinal: String?
 
     init() {
-        let (stream, cont) = AsyncStream<SttEvent>.makeStream()
-        self.events = stream
-        self.continuation = cont
+        let queue = SessionEventQueue()
+        self.queue = queue
+        self.events = queue.makeStream()
     }
 
     /// Yield a pause-segment commit. Mirrors a `committed_transcript` arriving
-    /// from the server while the user is still talking. `nonisolated` so tests
-    /// can drive it synchronously without awaiting the actor.
-    nonisolated func yieldFinal(_ text: String) {
-        continuation.yield(.final(text: text, alternatives: []))
+    /// from the server while the user is still talking.
+    func yieldFinal(_ text: String) async {
+        await queue.yield(.final(text: text, alternatives: []))
+    }
+
+    /// Wait until the orchestrator has handled every event yielded so far.
+    /// See `SessionEventQueue`.
+    func waitUntilHandled() async {
+        await queue.waitUntilHandled()
     }
 
     /// Pre-load the text the session will commit in response to `endOfStream`.
@@ -385,14 +400,14 @@ actor MultiSegmentSession: SttSession {
 
     func endOfStream() async throws {
         if let text = endOfStreamFinal {
-            continuation.yield(.final(text: text, alternatives: []))
+            await queue.yield(.final(text: text, alternatives: []))
         }
         // Mirror the real provider: server closes WS after the EOS commit.
-        continuation.finish()
+        await queue.finish()
     }
 
     func close() async {
-        continuation.finish()
+        await queue.finish()
     }
 }
 
@@ -671,6 +686,59 @@ final class SendFailureSession: SttSession, @unchecked Sendable {
     func close() async { continuation.finish() }
 }
 
+// MARK: - SessionEventQueue
+
+/// Backs a fake session's `events` stream and lets a test wait until the
+/// orchestrator has handled every event yielded so far. The orchestrator's
+/// session consumer asks for the next event only after `handleSessionEvent`
+/// returns for the previous one, so once it asks with nothing buffered,
+/// everything yielded has been handled.
+///
+/// Tests need this before releasing the hotkey: finalize's "no speech heard"
+/// fast path reads state that the consumer Task sets, and `.final` emits no
+/// `OrchestratorEvent` for an `EventCollector` to wait on.
+actor SessionEventQueue {
+    private var buffered: [SttEvent] = []
+    private var finished = false
+    private var consumer: CheckedContinuation<SttEvent?, Never>?
+    private var handledWaiters: [CheckedContinuation<Void, Never>] = []
+
+    nonisolated func makeStream() -> AsyncStream<SttEvent> {
+        AsyncStream(unfolding: { await self.next() })
+    }
+
+    func yield(_ event: SttEvent) {
+        guard !finished else { return }
+        if let consumer {
+            self.consumer = nil
+            consumer.resume(returning: event)
+        } else {
+            buffered.append(event)
+        }
+    }
+
+    /// Like `AsyncStream.Continuation.finish()`: buffered events are still
+    /// delivered, then the stream ends.
+    func finish() {
+        finished = true
+        consumer?.resume(returning: nil)
+        consumer = nil
+    }
+
+    func waitUntilHandled() async {
+        guard consumer == nil, !finished else { return }
+        await withCheckedContinuation { handledWaiters.append($0) }
+    }
+
+    private func next() async -> SttEvent? {
+        if !buffered.isEmpty { return buffered.removeFirst() }
+        for waiter in handledWaiters { waiter.resume() }
+        handledWaiters = []
+        if finished { return nil }
+        return await withCheckedContinuation { consumer = $0 }
+    }
+}
+
 // MARK: - EventCollector
 
 /// Drains an `AsyncStream<OrchestratorEvent>` into an array so tests can
@@ -680,6 +748,7 @@ final class SendFailureSession: SttSession, @unchecked Sendable {
 actor EventCollector {
     private(set) var collected: [OrchestratorEvent] = []
     private var task: Task<Void, Never>?
+    private var waiter: (expected: OrchestratorEvent, continuation: CheckedContinuation<Void, Never>)?
 
     func start(stream: AsyncStream<OrchestratorEvent>) {
         let captured = self
@@ -692,6 +761,10 @@ actor EventCollector {
 
     private func append(_ event: OrchestratorEvent) {
         collected.append(event)
+        if let waiter, waiter.expected == event {
+            self.waiter = nil
+            waiter.continuation.resume()
+        }
     }
 
     /// Yield a few times to give the consumer Task a chance to process any
@@ -704,16 +777,22 @@ actor EventCollector {
 
     /// Wait until a specific event has been collected, then return the full
     /// buffer. This avoids sampling the stream before the consumer Task has
-    /// processed an async event.
-    func waitForEvent(
-        _ expected: OrchestratorEvent,
-        maxYields: Int = 2_000
-    ) async -> [OrchestratorEvent] {
-        for _ in 0..<maxYields {
-            if collected.contains(expected) { return collected }
-            await Task.yield()
+    /// processed an async event. Gives up after 10 s so a regression fails
+    /// its expectations instead of hanging the run.
+    func waitForEvent(_ expected: OrchestratorEvent) async -> [OrchestratorEvent] {
+        if collected.contains(expected) { return collected }
+        let timeoutTask = Task {
+            try await Task.sleep(for: .seconds(10))
+            self.stopWaiting()
         }
+        await withCheckedContinuation { waiter = (expected, $0) }
+        timeoutTask.cancel()
         return collected
+    }
+
+    private func stopWaiting() {
+        waiter?.continuation.resume()
+        waiter = nil
     }
 
     func cancel() {

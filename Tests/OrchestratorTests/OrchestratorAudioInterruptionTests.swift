@@ -56,11 +56,8 @@ struct OrchestratorAudioInterruptionTests {
         #expect(await rig.orchestrator.isCapturing())
 
         await rig.orchestrator.handleAudioInterruption()
-        // Several actor hops happen inside interruptAndReset (audioCapture.stop,
-        // stateMachine.reset). Yield enough times for the collector to drain.
-        for _ in 0..<16 { await Task.yield() }
 
-        let events = await collector.snapshot()
+        let events = await collector.waitForEvent(.sessionEnded(injectedText: nil))
         let errorIndex = events.firstIndex { event in
             if case .error = event { return true }
             return false
@@ -115,9 +112,10 @@ struct OrchestratorAudioInterruptionTests {
         await rig.orchestrator.handle(hotkeyEvent: .keyDown(at: now))
         await rig.timer.fireAll()
         await rig.provider.yieldFinal("hello after change")
+        await rig.provider.waitUntilHandled()
         await rig.orchestrator.handle(hotkeyEvent: .keyUp(at: now))
 
-        let events = await collector.snapshot()
+        let events = await collector.waitForEvent(.sessionEnded(injectedText: "hello after change"))
         #expect(events.contains(.sessionEnded(injectedText: "hello after change")))
         #expect(await rig.injector.received == ["hello after change"])
 
